@@ -3,6 +3,12 @@
 xcuserdata/
 build/
 DerivedData/
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
 .env
 .env.local
 node_modules/

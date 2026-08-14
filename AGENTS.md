@@ -4,8 +4,8 @@ A macOS menu-bar app with a desktop mascot that watches which app you're in, not
 you're doing something by hand that AI could do, interrupts you about it, and hands the
 task to Claude in one gesture.
 
-**This file is mirrored by [`AGENTS.md`](AGENTS.md) so non-Claude agents route the same
-way. Keep the two in sync — if you change one, change the other.**
+**This file mirrors [`CLAUDE.md`](CLAUDE.md) so non-Claude agents route the same way. Keep
+the two in sync — if you change one, change the other.**
 
 ## Start here
 
@@ -50,8 +50,7 @@ Log lives at `~/Library/Application Support/AISlap/phase0.sqlite`. Never in the 
 - **Interruptions are a desktop mascot, and the mascot is also the handoff button.** A
   mascot that only nags gets muted.
 - **Native Swift + SpriteKit, distributed outside the Mac App Store.** The MAS sandbox
-  effectively forbids the Accessibility API this depends on. Electron cannot do a
-  transparent, click-through, non-activating always-on-top overlay reasonably.
+  effectively forbids the Accessibility API this depends on.
 - **SwiftPM, not an `.xcodeproj`.** The Command Line Tools build, sign, notarize and
   staple without Xcode. Install Xcode when the SpriteKit mascot needs a live preview —
   a SwiftPM package opens in it directly, so this is not a one-way door.
