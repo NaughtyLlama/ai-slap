@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "version": "2026.08.14",
+
+  "_comment": [
+    "The baked-in default rulebook. docs/03 requires this to become a remote,",
+    "Ed25519-signed artifact in Phase 2 — a title-format change at Gmail must be",
+    "fixable in six hours, not in a notarisation round. The loader is written so",
+    "that swap is a fetch-and-verify step, not a rewrite.",
+    "",
+    "Patterns are written from published window-title formats, deliberately not",
+    "from any one person's log. Personalisation is a separate layer: the rulebook",
+    "says what a context IS, the Personaliser learns what is unusual FOR YOU."
+  ],
+
+  "aiContexts": {
+    "_comment": [
+      "Seeing any of these opens a grace window and suppresses every rule.",
+      "docs/02: fail open — accusing someone of skipping AI right after they used",
+      "it is the fastest uninstall available.",
+      "",
+      "Because this suppresses everything, a false positive here is expensive in a",
+      "way a missed nudge is not: it silences the product invisibly. So the title",
+      "patterns are only consulted for BROWSER windows, where the title is the page",
+      "<title>, and they are anchored rather than matched as bare words. A note",
+      "called 'Claude', a folder called 'Claude Working Folder', a Slack channel",
+      "called #chatgpt — none of those are AI use, and an unanchored word match",
+      "treats all three as a ten-minute amnesty.",
+      "",
+      "bundleIds are native AI clients, matched exactly. Only editors that are",
+      "AI-native by default belong here; docs/02 accepts the imprecision for those",
+      "because in-editor AI use is invisible from outside. A general editor like VS",
+      "Code does not qualify — listing it would silence the product for anyone who",
+      "writes code all day."
+    ],
+    "bundleIds": [
+      "com.anthropic.claudefordesktop",
+      "com.openai.chat",
+      "com.google.gemini",
+      "com.todesktop.230313mzl4w4u92",
+      "com.exafunction.windsurf"
+    ],
+    "browserTitlePatterns": [
+      "^Claude$",
+      "^Claude \\|",
+      "^Claude - ",
+      "(?i)\\bclaude\\.ai\\b",
+      "^ChatGPT\\b",
+      "(?i) - ChatGPT( - .*)?$",
+      "^Gemini\\b",
+      "(?i) - Google Gemini( - .*)?$",
+      "(?i)^Perplexity\\b",
+      "(?i) - Perplexity( - .*)?$",
+      "(?i)^Microsoft Copilot\\b",
+      "(?i)^Le Chat\\b"
+    ]
+  },
+
+  "browserBundleIds": [
+    "com.google.Chrome",
+    "com.apple.Safari",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",
+    "com.microsoft.edgemac",
+    "org.mozilla.firefox",
+    "com.vivaldi.Vivaldi",
+    "com.operasoftware.Opera"
+  ],
+
+  "rules": [
+    {
+      "id": "email.message.dwell",
+      "enabled": true,
+      "category": "email.message",
+      "_comment": [
+        "Webmail titles are 'Subject - account@domain - Gmail' or, on Workspace,",
+        "'... - <Org> Mail'. Excluding the mailbox-folder titles is what separates",
+        "'reading one specific message' from 'staring at an inbox' — the single",
+        "highest-value distinction in docs/02, and it needs no page access.",
+        "Folder names are localised, so the exclusions carry locale variants."
+      ],
+      "match": {
+        "useBrowserBundles": true,
+        "extraBundleIds": ["com.apple.mail", "com.microsoft.Outlook", "com.readdle.smartemail-Mac"],
+        "titlePatterns": [
+          "^.+ - [^ @]+@[^ ]+ - (Gmail|.+ Mail)( - .*)?$",
+          "^.+ - Outlook( - .*)?$",
+          "^.+ \\u2014 .+@.+$"
+        ],
+        "excludeTitlePatterns": [
+          "^(Inbox|Sent|Drafts|Spam|Trash|Starred|Snoozed|Scheduled|All Mail|Archive|Important)\\b",
+          "^(Boîte de réception|Messages envoyés|Brouillons|Corbeille)\\b",
+          "^(Posteingang|Gesendet|Entwürfe|Papierkorb)\\b",
+          "^(Bandeja de entrada|Enviados|Borradores|Papelera)\\b",
+          "^(受信トレイ|送信済みメール|下書き)\\b"
+        ]
+      },
+      "condition": { "dwellMs": 90000, "noAiContextForMs": 600000 },
+      "confidence": 0.8,
+      "cooldownMs": 3600000,
+      "nudge": {
+        "copy": "Still on that one email. Want a draft instead?",
+        "promptTemplate": "Here's an email I need to reply to. Draft a concise reply in my voice."
+      }
+    },
+
+    {
+      "id": "email.inbox.dwell",
+      "enabled": true,
+      "category": "email.inbox",
+      "_comment": [
+        "Triage rather than composition, so lower confidence and a longer fuse.",
+        "The unread count lives in the title and changes as you read, so this",
+        "matches the folder prefix only — never the whole string."
+      ],
+      "match": {
+        "useBrowserBundles": true,
+        "extraBundleIds": ["com.apple.mail", "com.microsoft.Outlook"],
+        "titlePatterns": [
+          "^Inbox( \\(\\d+\\))? - .+ - (Gmail|.+ Mail)( - .*)?$",
+          "^(Inbox|Boîte de réception|Posteingang|Bandeja de entrada)\\b.*"
+        ]
+      },
+      "condition": { "dwellMs": 240000, "noAiContextForMs": 600000 },
+      "confidence": 0.45,
+      "cooldownMs": 10800000,
+      "nudge": {
+        "copy": "Long stretch in the inbox. Want help clearing it?",
+        "promptTemplate": "Help me triage and draft replies for a backlog of email."
+      }
+    },
+
+    {
+      "id": "chat.thread.dwell",
+      "enabled": true,
+      "category": "chat.thread",
+      "match": {
+        "extraBundleIds": [
+          "com.tinyspeck.slackmacgap",
+          "com.microsoft.teams2",
+          "com.hnc.Discord",
+          "com.apple.MobileSMS"
+        ],
+        "useBrowserBundles": true,
+        "titlePatterns": [
+          "\\bSlack$|\\bSlack - ",
+          "\\| Microsoft Teams",
+          "\\bDiscord\\b"
+        ]
+      },
+      "condition": { "dwellMs": 120000, "noAiContextForMs": 600000 },
+      "confidence": 0.6,
+      "cooldownMs": 5400000,
+      "nudge": {
+        "copy": "That thread's eating your afternoon.",
+        "promptTemplate": "Help me write a clear response to this conversation thread."
+      }
+    },
+
+    {
+      "id": "doc.dwell",
+      "enabled": true,
+      "category": "doc",
+      "_comment": "Writing surfaces. A blank-document check needs page access we don't have, so dwell substitutes — see docs/02.",
+      "match": {
+        "useBrowserBundles": true,
+        "extraBundleIds": [
+          "com.microsoft.Word",
+          "com.apple.iWork.Pages",
+          "notion.id",
+          "md.obsidian",
+          "com.google.Chrome.app.Documents"
+        ],
+        "titlePatterns": [
+          " - Google Docs( - .*)?$",
+          " - Word( - .*)?$",
+          " - Notion( - .*)?$",
+          " - Obsidian( .*)?$",
+          "^Untitled document\\b"
+        ]
+      },
+      "condition": { "dwellMs": 150000, "noAiContextForMs": 600000 },
+      "confidence": 0.65,
+      "cooldownMs": 5400000,
+      "nudge": {
+        "copy": "Blank page winning? Hand it over.",
+        "promptTemplate": "Help me outline and draft this document."
+      }
+    },
+
+    {
+      "id": "sheet.dwell",
+      "enabled": true,
+      "category": "sheet",
+      "match": {
+        "useBrowserBundles": true,
+        "extraBundleIds": ["com.microsoft.Excel", "com.apple.iWork.Numbers"],
+        "titlePatterns": [
+          " - Google Sheets( - .*)?$",
+          " - Excel( - .*)?$",
+          " - Numbers( - .*)?$"
+        ]
+      },
+      "condition": { "dwellMs": 180000, "noAiContextForMs": 600000 },
+      "confidence": 0.6,
+      "cooldownMs": 5400000,
+      "nudge": {
+        "copy": "Formula wrangling is a solved problem.",
+        "promptTemplate": "Help me with this spreadsheet — formulas, cleanup, or analysis."
+      }
+    },
+
+    {
+      "id": "search.repeated",
+      "enabled": true,
+      "category": "search",
+      "_comment": "Repetition, not dwell: several searches inside one window means the answer isn't being found.",
+      "match": {
+        "useBrowserBundles": true,
+        "titlePatterns": [
+          " - Google Search\\b",
+          " - Brave Search\\b",
+          " at DuckDuckGo\\b",
+          " - Bing\\b",
+          " - Search \\(Ecosia\\)"
+        ]
+      },
+      "condition": {
+        "dwellMs": 20000,
+        "noAiContextForMs": 600000,
+        "repeatCount": 3,
+        "repeatWithinMs": 600000
+      },
+      "confidence": 0.7,
+      "cooldownMs": 5400000,
+      "nudge": {
+        "copy": "Third search on this. Just ask properly.",
+        "promptTemplate": "I've been searching for this without luck. Answer it properly."
+      }
+    },
+
+    {
+      "id": "timer.checkin",
+      "enabled": false,
+      "category": "any",
+      "_comment": "docs/03: the second source quote, built literally. Context-free, so it can never be wrong. Default off, user turns it on.",
+      "match": { "matchesAnything": true },
+      "condition": { "dwellMs": 1500000, "noAiContextForMs": 1500000 },
+      "confidence": 0.5,
+      "cooldownMs": 1500000,
+      "nudge": {
+        "copy": "Whatever you're doing — want to send it over?",
+        "promptTemplate": "Here's what I'm working on. How would you help with it?"
+      }
+    }
+  ]
+}

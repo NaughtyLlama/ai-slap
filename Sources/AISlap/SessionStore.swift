@@ -21,7 +21,13 @@ final class SessionStore {
     /// launcher taking focus for an instant. They are noise in a dwell-time study.
     static let minimumDwell: TimeInterval = 2.0
 
-    private var db: OpaquePointer?
+    /// If you return to the context you just left within this window, it was one sit,
+    /// not two. Dropping a sub-`minimumDwell` flicker in the middle of a sit would
+    /// otherwise split it — and dwell is the signal every rule triggers on, so a
+    /// 90-second email splitting into 40 + 24 silently loses the trigger.
+    static let mergeWindow: TimeInterval = 5.0
+
+    var db: OpaquePointer?
     let databaseURL: URL
 
     init() throws {
@@ -63,6 +69,42 @@ final class SessionStore {
             CREATE INDEX IF NOT EXISTS sessions_started_at
                 ON sessions(started_at);
             """)
+
+        // Added with the rules engine. Existing spike databases predate it, so this
+        // is additive and failure here is not fatal.
+        if !columnExists(table: "sessions", column: "category") {
+            try? execute("ALTER TABLE sessions ADD COLUMN category TEXT;")
+        }
+
+        // One row per interruption. `outcome` starts as "fired" and is updated when
+        // the user responds, so acceptance is accepted ÷ fired by construction —
+        // the north star in docs/03, and deliberately not "interruptions fired".
+        try execute("""
+            CREATE TABLE IF NOT EXISTS rule_events (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                at       REAL NOT NULL,
+                rule_id  TEXT NOT NULL,
+                category TEXT,
+                outcome  TEXT NOT NULL,
+                hour     INTEGER NOT NULL
+            );
+            """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS rule_events_rule ON rule_events(rule_id, at);
+            """)
+    }
+
+    private func columnExists(table: String, column: String) -> Bool {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "PRAGMA table_info(\(table));", -1, &statement, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if columnText(statement, 1) == column { return true }
+        }
+        return false
     }
 
     deinit {
@@ -71,15 +113,49 @@ final class SessionStore {
 
     // MARK: - Writing
 
-    /// Returns false if the session was too short to be worth keeping.
+    /// The last row written, so a return to the same context within `mergeWindow`
+    /// extends it instead of starting a second row.
+    private struct LastWrite {
+        let rowID: Int64
+        let context: WindowContext
+        let startedAt: Date
+        var endedAt: Date
+    }
+    private var lastWrite: LastWrite?
+
+    /// Result of offering a finished session to the log.
+    enum RecordOutcome {
+        /// Written as a new row.
+        case inserted
+        /// Folded into the row that came immediately before it — same context,
+        /// returned to within `mergeWindow`.
+        case merged
+        /// Below `minimumDwell` and not a return to the previous context: flicker.
+        case dropped
+    }
+
     @discardableResult
-    func record(_ session: Session) throws -> Bool {
-        guard session.dwell >= Self.minimumDwell else { return false }
+    func record(_ session: Session, category: String?) throws -> RecordOutcome {
+        // A return to the context we just left, with only a flicker in between.
+        if var last = lastWrite,
+           last.context == session.context,
+           session.startedAt.timeIntervalSince(last.endedAt) <= Self.mergeWindow
+        {
+            last.endedAt = session.endedAt
+            lastWrite = last
+            try extendRow(
+                id: last.rowID, startedAt: last.startedAt, endedAt: last.endedAt
+            )
+            return .merged
+        }
+
+        guard session.dwell >= Self.minimumDwell else { return .dropped }
 
         let sql = """
             INSERT INTO sessions
-                (started_at, ended_at, dwell_seconds, bundle_id, app_name, window_title)
-            VALUES (?, ?, ?, ?, ?, ?);
+                (started_at, ended_at, dwell_seconds, bundle_id, app_name,
+                 window_title, category)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
             """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -97,11 +173,42 @@ final class SessionStore {
         } else {
             sqlite3_bind_null(statement, 6)
         }
+        if let category {
+            bindText(statement, 7, category)
+        } else {
+            sqlite3_bind_null(statement, 7)
+        }
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw StoreError.write(message: lastErrorMessage)
         }
-        return true
+
+        lastWrite = LastWrite(
+            rowID: sqlite3_last_insert_rowid(db),
+            context: session.context,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt
+        )
+        return .inserted
+    }
+
+    private func extendRow(id: Int64, startedAt: Date, endedAt: Date) throws {
+        let sql = """
+            UPDATE sessions SET ended_at = ?, dwell_seconds = ? WHERE id = ?;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw StoreError.write(message: lastErrorMessage)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, endedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, endedAt.timeIntervalSince(startedAt))
+        sqlite3_bind_int64(statement, 3, id)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw StoreError.write(message: lastErrorMessage)
+        }
     }
 
     // MARK: - Reading
@@ -150,9 +257,15 @@ final class SessionStore {
             .deletingLastPathComponent()
             .appendingPathComponent("phase0-export.csv")
 
-        var csv = "started_at,dwell_seconds,bundle_id,app_name,window_title,label\n"
+        // Fold the write-ahead log into the database file first. Without this the
+        // .sqlite is a near-empty shell and the data lives in a sibling -wal file —
+        // copy the database alone and you appear to have lost everything.
+        sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
+
+        var csv = "started_at,dwell_seconds,bundle_id,app_name,category,window_title,label\n"
         let sql = """
-            SELECT started_at, dwell_seconds, bundle_id, app_name, window_title, label
+            SELECT started_at, dwell_seconds, bundle_id, app_name, category,
+                   window_title, label
             FROM sessions ORDER BY started_at;
             """
         var statement: OpaquePointer?
@@ -172,6 +285,7 @@ final class SessionStore {
                 columnText(statement, 3) ?? "",
                 columnText(statement, 4) ?? "",
                 columnText(statement, 5) ?? "",
+                columnText(statement, 6) ?? "",
             ]
             csv += fields.map(csvEscaped).joined(separator: ",") + "\n"
         }

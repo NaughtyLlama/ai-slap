@@ -14,17 +14,23 @@ Read [`README.md`](README.md) first, then the docs in order. `docs/02` (detectio
 
 ## Where the code is
 
-Phase 0 — the signal spike from `docs/08` — is built. Nothing beyond it exists.
+Phase 0 (the `docs/08` signal spike) and the rules engine (`docs/03`) are built.
+No mascot, no backend, no accounts, no handoff.
 
 ```
 Package.swift                          SwiftPM manifest (no Xcode project by design)
 Sources/AISlap/
   main.swift                           NSApplication bootstrap, .accessory policy
-  AppDelegate.swift                    session open/close, permission, pause
+  AppDelegate.swift                    session open/close, permissions, menu actions
   WindowContext.swift                  the observed-context and session types
   WindowContextObserver.swift          tier 0 + tier 1 detection
   SessionStore.swift                   local SQLite log + CSV export
+  SessionStore+Analytics.swift         dwell history and interruption outcomes
+  Rulebook.swift                       rule schema, loading, compiled matching
+  Personalizer.swift                   per-user adaptation (see below)
+  InterruptionEngine.swift             gating + notification delivery
   MenuBarController.swift              the entire UI
+Resources/rulebook.json                baked-in default rulebook
 Resources/Info.plist                   LSUIElement, bundle ID, version
 scripts/build-app.sh                   source → AISlap.app, Command Line Tools only
 ```
@@ -36,6 +42,33 @@ Build and run:
 ```
 
 Log lives at `~/Library/Application Support/AISlap/phase0.sqlite`. Never in the repo.
+
+## The rulebook / Personaliser split
+
+**The rulebook says what a context *is*. The Personaliser says what is unusual *for
+you*.** Keeping these apart is the load-bearing idea in the client.
+
+The rulebook is generic and identical for everybody, which is what lets it become the
+shared, signed, remotely-updatable artifact `docs/03` requires. Patterns are written
+from published window-title formats — never reverse-engineered from one person's log.
+
+The Personaliser never leaves the device and adapts three things:
+
+1. **Dwell thresholds** become a high percentile (p85) of *your own* dwell times in
+   that category. A fixed 90-second email rule is wrong for nearly everyone: someone
+   who clears mail in 20-second bursts never trips it and concludes the app is broken;
+   someone who lives in 6-minute threads gets pestered. Bounded to 0.4×–2.5× the
+   rulebook value with a 20s floor, so a strange week can't produce a rule that fires
+   constantly or never.
+2. **Per-rule trust** — a Beta posterior over accept/dismiss, shrunk toward the
+   rulebook default until ~6 resolved outcomes. Below 15% useful over 12+ outcomes the
+   rule mutes itself locally, mirroring the remote pull in `docs/03`.
+3. **Time-of-day receptivity** — if you never take a nudge before 10am, it stops
+   asking before 10am.
+
+Cold start behaves exactly as specced and drifts from there. **"What it's learned about
+you…" in the menu prints all of it in plain language** — a system that quietly retunes
+itself has to show its work, or the first surprising silence reads as a bug.
 
 ## Decisions already made — don't relitigate without a reason
 
@@ -58,26 +91,43 @@ Log lives at `~/Library/Application Support/AISlap/phase0.sqlite`. Never in the 
 - **Never auto-submit** a handoff. The user reads what's about to be sent.
 - **The north star is accepted interruptions, never interruptions fired.**
 
-## Phase 0 deviations from the spec — deliberate, and load-bearing
+## Deviations from the spec — deliberate, and load-bearing
 
-Two places where the shipped code knowingly departs from the docs. Both are Phase 0 only.
+Where the shipped code knowingly departs from the docs, and why.
 
 1. **Raw window titles are written to disk.** `docs/02` says a title is reduced to a
-   category token within the tick and the raw string discarded. Phase 0 cannot do that:
-   hand-labelling real titles *is* the deliverable. The exception is confined to
-   `SessionStore.swift` and marked ⚠️ there. **Delete that file when the rules engine
-   lands — do not extend it.**
+   category token within the tick and the raw string discarded. The Phase 0 log cannot
+   do that: hand-labelling real titles *is* its deliverable. Confined to
+   `SessionStore.swift` and marked ⚠️ there. The rules engine already works on category
+   tokens, so **when labelling is finished, cut the raw-title column rather than
+   extending it.** The engine will not need changing.
 2. **An `AXObserver` supplements the workspace notification.**
    `NSWorkspace.didActivateApplicationNotification` only fires on app switches, so it
-   never sees a browser tab change or a Gmail message opening — which is the highest-value
-   signal in the product. `kAXTitleChangedNotification` on the focused window covers it.
-   A 10-second reconcile timer backstops apps with unreliable AX notifications. This is
-   still event-driven; the 1 Hz poll `docs/02` warns against is not what's happening.
+   never sees a browser tab change or a Gmail message opening — the highest-value signal
+   in the product. `kAXTitleChangedNotification` on the focused window covers it. A
+   10-second reconcile timer backstops apps with unreliable AX notifications. Still
+   event-driven; the 1 Hz poll `docs/02` warns against is not what's happening.
+3. **AI-context title patterns apply to browser windows only.** Matching model names
+   against any window title is not survivable: an Obsidian vault named "Claude Working
+   Folder" classified every note as AI use, opening a rolling 10-minute amnesty that
+   silenced every rule invisibly. `docs/02` names this ambiguity; the fix is that
+   `aiContexts.browserTitlePatterns` is consulted only when the frontmost app is a
+   browser, where the title really is the page `<title>`, and the patterns are anchored
+   rather than bare word matches. A false positive here is far more expensive than a
+   missed nudge, because it silences the product without telling anyone.
+4. **Returning to a context within 5s extends the previous session.** A sub-2s flicker
+   between two halves of one sit would otherwise split it, and dwell is what every rule
+   triggers on — a 90-second email logging as 40 + 24 loses the trigger silently.
+5. **Only AI-native editors count as AI contexts.** `docs/02` accepts treating AI-native
+   editors as AI wholesale. That reasoning does not extend to general editors: listing
+   VS Code would silence the product for anyone who writes code all day.
 
 ## Open questions — marked ⚠️ throughout the docs
 
-1. Are window titles accurate enough alone? **Phase 0 answers this with data.** Don't
-   build past it without running the spike — see `docs/08`.
+1. Are window titles accurate enough alone? **Partly answered, informally.** One
+   person's log showed Gmail, Slack, Obsidian and search titles all classify cleanly,
+   which was enough for the owner to proceed. Precision was never measured against
+   hand-labels, so the honest status is "promising, unquantified" — not "passed".
 2. Mac-only caps the enterprise market. Windows client, and when?
 3. Does the goose open doors or close them with real buyers?
 4. Pricing in `docs/01` is a placeholder, not validated.
@@ -85,9 +135,16 @@ Two places where the shipped code knowingly departs from the docs. Both are Phas
 
 ## What happens next
 
-Phase 0 is built but **unanswered**. Run it, hand-label the CSV, and compare against the
-decision gate in `docs/08` before writing rules, a mascot, or a backend. The gate exists
-so question 1 gets settled with data rather than enthusiasm.
+The formal `docs/08` gate — two weeks, five people, hand-labelled precision — was
+**deliberately skipped by the owner as too heavy for this stage.** What replaced it: one
+person's real log confirmed that Gmail titles separate "one open message" from "inbox"
+cleanly, which was the assumption the gate existed to protect. Rules were written from
+published title formats, then checked against that log. Treat the precision numbers as
+unmeasured, because they are.
+
+Next is the mascot (`docs/04`) and the handoff (`docs/05`). **Commission character art on
+day one of that phase** — it has lead time engineering doesn't. Until the handoff exists,
+accepting a nudge only brings the AI app forward, which understates acceptance.
 
 Distribution is blocked on an Apple Developer ID. Until then builds are ad-hoc signed and
 macOS may drop the Accessibility grant on rebuild, since TCC keys the permission to the

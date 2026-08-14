@@ -1,9 +1,12 @@
 import AppKit
 import ApplicationServices
+import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate,
+                         UNUserNotificationCenterDelegate {
 
     private var store: SessionStore?
+    private var engine: InterruptionEngine?
     private let observer = WindowContextObserver()
     private var menuBar: MenuBarController?
 
@@ -13,7 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            store = try SessionStore()
+            let store = try SessionStore()
+            self.store = store
+
+            let rulebook = try Rulebook.loadBundled()
+            engine = InterruptionEngine(
+                rulebook: rulebook,
+                store: store,
+                personalizer: Personalizer(store: store)
+            )
+            engine?.onFire = { [weak self] in self?.refreshMenu() }
         } catch {
             presentFatal(error)
             return
@@ -21,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar = MenuBarController(
             onTogglePause: { [weak self] in self?.togglePause() },
+            onToggleNudges: { [weak self] in self?.toggleNudges() },
+            onSetSensitivity: { [weak self] in self?.setSensitivity($0) },
+            onShowLearned: { [weak self] in self?.showLearned() },
             onExport: { [weak self] in self?.export() },
             onRevealData: { [weak self] in self?.revealData() },
             onDeleteAll: { [weak self] in self?.deleteAll() }
@@ -29,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observer.onChange = { [weak self] context in
             self?.contextChanged(to: context)
         }
+
+        UNUserNotificationCenter.current().delegate = self
+        InterruptionEngine.registerNotificationCategory()
+        requestNotificationPermission()
 
         requestAccessibilityIfNeeded()
         observer.start()
@@ -44,12 +63,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func contextChanged(to context: WindowContext) {
         let now = Date()
         closeCurrentSession(at: now)
+
         currentContext = context
         currentStartedAt = now
+
+        if !isPaused {
+            engine?.contextBegan(context, at: now)
+        }
         refreshMenu()
     }
 
     private func closeCurrentSession(at end: Date) {
+        engine?.contextEnded()
+
         guard !isPaused,
               let context = currentContext,
               let start = currentStartedAt,
@@ -62,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let session = Session(context: context, startedAt: start, endedAt: end)
         do {
-            try store.record(session)
+            try store.record(session, category: engine?.category(for: context))
         } catch {
             NSLog("AISlap: failed to record session — \(error.localizedDescription)")
         }
@@ -70,10 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentStartedAt = nil
     }
 
-    // MARK: - Permission
+    // MARK: - Permissions
 
     /// One prompt, at launch, per the permission budget in docs/02. Screen Recording
-    /// is never requested here — Phase 0 does not capture anything.
+    /// is never requested — nothing here captures anything.
     private func requestAccessibilityIfNeeded() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue()
         let options = [key: true] as CFDictionary
@@ -81,13 +107,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !trusted {
             NSLog("AISlap: Accessibility not granted — running on bundle IDs only.")
-            // The system prompt is modal-free and easy to miss, so re-check shortly
-            // after and pick up the permission without needing a relaunch.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.observer.refresh()
                 self?.refreshMenu()
             }
         }
+    }
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert]) { granted, error in
+                if let error {
+                    NSLog("AISlap: notification auth failed — \(error.localizedDescription)")
+                } else if !granted {
+                    NSLog("AISlap: notifications denied — nudges will not appear.")
+                }
+            }
+    }
+
+    // MARK: - Notification responses
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        if let eventID = info["eventID"] as? Int64,
+           let ruleID = info["ruleID"] as? String {
+            engine?.handleResponse(
+                actionIdentifier: response.actionIdentifier,
+                eventID: eventID,
+                ruleID: ruleID
+            )
+        }
+        refreshMenu()
+        completionHandler()
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler:
+            @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list])
     }
 
     // MARK: - Menu actions
@@ -103,6 +167,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             observer.stop()
         }
         refreshMenu()
+    }
+
+    private func toggleNudges() {
+        guard let engine else { return }
+        engine.isEnabled.toggle()
+        refreshMenu()
+    }
+
+    private func setSensitivity(_ sensitivity: InterruptionEngine.Sensitivity) {
+        engine?.sensitivity = sensitivity
+        refreshMenu()
+    }
+
+    /// A system that quietly retunes itself has to be able to show its work, or the
+    /// first surprising silence reads as a bug.
+    private func showLearned() {
+        guard let engine else { return }
+        let alert = NSAlert()
+        alert.messageText = "What AI-slap has learned about you"
+        alert.informativeText = engine.explanation()
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func export() {
@@ -125,7 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Delete all logged sessions?"
         alert.informativeText =
-            "This permanently erases the local log at \(store.databaseURL.path). "
+            "This permanently erases the local log at \(store.databaseURL.path), "
+            + "including everything the app has learned about your habits. "
             + "It cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
@@ -146,8 +235,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let store, let menuBar else { return }
         menuBar.update(
             context: isPaused ? nil : currentContext,
+            category: currentContext.flatMap { engine?.category(for: $0) },
             stats: store.statsSinceStartOfDay(),
+            nudgesToday: store.firedToday(),
+            dailyBudget: engine?.dailyBudget ?? 0,
             isPaused: isPaused,
+            nudgesEnabled: engine?.isEnabled ?? false,
+            sensitivity: engine?.sensitivity ?? .balanced,
             hasAccessibility: AXIsProcessTrusted()
         )
     }
