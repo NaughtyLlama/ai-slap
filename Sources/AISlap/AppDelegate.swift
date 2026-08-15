@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private var currentContext: WindowContext?
     private var currentStartedAt: Date?
     private var isPaused = false
+    private var menuRefreshTimer: Timer?
+    private var notificationsAllowed = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -36,10 +38,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onToggleNudges: { [weak self] in self?.toggleNudges() },
             onSetSensitivity: { [weak self] in self?.setSensitivity($0) },
             onShowLearned: { [weak self] in self?.showLearned() },
+            onTestNudge: { [weak self] in self?.engine?.sendTestNudge() },
+            onFixPermission: { [weak self] in self?.openAccessibilitySettings() },
             onExport: { [weak self] in self?.export() },
             onRevealData: { [weak self] in self?.revealData() },
             onDeleteAll: { [weak self] in self?.deleteAll() }
         )
+
+        // The status line counts down toward a fire and reports why it's held, so it
+        // has to move on its own rather than only on context change.
+        menuRefreshTimer = Timer.scheduledTimer(
+            withTimeInterval: 5, repeats: true
+        ) { [weak self] _ in
+            self?.refreshMenu()
+        }
 
         observer.onChange = { [weak self] context in
             self?.contextChanged(to: context)
@@ -231,18 +243,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         }
     }
 
+    /// The permission is granted outside the app, so it can come back at any moment —
+    /// and after a rebuild it can vanish the same way. Re-check on every refresh.
+    private func openAccessibilitySettings() {
+        let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        )!
+        NSWorkspace.shared.open(url)
+    }
+
     private func refreshMenu() {
         guard let store, let menuBar else { return }
+
+        engine?.notificationStatus { [weak self] allowed in
+            self?.notificationsAllowed = allowed
+        }
+
         menuBar.update(
             context: isPaused ? nil : currentContext,
             category: currentContext.flatMap { engine?.category(for: $0) },
+            statusLine: engine?.statusLine(
+                for: isPaused ? nil : currentContext, since: currentStartedAt
+            ) ?? "—",
             stats: store.statsSinceStartOfDay(),
             nudgesToday: store.firedToday(),
             dailyBudget: engine?.dailyBudget ?? 0,
             isPaused: isPaused,
             nudgesEnabled: engine?.isEnabled ?? false,
             sensitivity: engine?.sensitivity ?? .balanced,
-            hasAccessibility: AXIsProcessTrusted()
+            hasAccessibility: AXIsProcessTrusted(),
+            notificationsAllowed: notificationsAllowed
         )
     }
 

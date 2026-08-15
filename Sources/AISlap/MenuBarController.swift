@@ -8,7 +8,9 @@ final class MenuBarController {
     private let menu = NSMenu()
 
     private let permissionItem = NSMenuItem()
+    private let notificationItem = NSMenuItem()
     private let contextItem = NSMenuItem()
+    private let statusItemLine = NSMenuItem()
     private let statsItem = NSMenuItem()
     private let nudgeStatsItem = NSMenuItem()
     private let nudgeToggleItem = NSMenuItem()
@@ -19,6 +21,8 @@ final class MenuBarController {
     private let onToggleNudges: () -> Void
     private let onSetSensitivity: (InterruptionEngine.Sensitivity) -> Void
     private let onShowLearned: () -> Void
+    private let onTestNudge: () -> Void
+    private let onFixPermission: () -> Void
     private let onExport: () -> Void
     private let onRevealData: () -> Void
     private let onDeleteAll: () -> Void
@@ -28,6 +32,8 @@ final class MenuBarController {
         onToggleNudges: @escaping () -> Void,
         onSetSensitivity: @escaping (InterruptionEngine.Sensitivity) -> Void,
         onShowLearned: @escaping () -> Void,
+        onTestNudge: @escaping () -> Void,
+        onFixPermission: @escaping () -> Void,
         onExport: @escaping () -> Void,
         onRevealData: @escaping () -> Void,
         onDeleteAll: @escaping () -> Void
@@ -36,30 +42,52 @@ final class MenuBarController {
         self.onToggleNudges = onToggleNudges
         self.onSetSensitivity = onSetSensitivity
         self.onShowLearned = onShowLearned
+        self.onTestNudge = onTestNudge
+        self.onFixPermission = onFixPermission
         self.onExport = onExport
         self.onRevealData = onRevealData
         self.onDeleteAll = onDeleteAll
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "eye", accessibilityDescription: "AI-slap"
-        )
-        statusItem.button?.image?.isTemplate = true
-
         buildMenu()
         statusItem.menu = menu
     }
 
+    /// The icon is the only part of this app most people will ever look at, so a
+    /// missing permission has to be visible there. Losing an afternoon to a warning
+    /// buried one click deep in a menu is how the last one went.
+    private func applyIcon(hasAccessibility: Bool, notificationsAllowed: Bool) {
+        let broken = !hasAccessibility || !notificationsAllowed
+        let symbol = broken ? "exclamationmark.triangle.fill" : "eye"
+        let image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: broken ? "AI-slap needs attention" : "AI-slap"
+        )
+        image?.isTemplate = !broken
+        statusItem.button?.image = image
+        statusItem.button?.contentTintColor = broken ? .systemRed : nil
+        statusItem.button?.toolTip = broken
+            ? "AI-slap can't work — open the menu"
+            : "AI-slap"
+    }
+
     private func buildMenu() {
-        permissionItem.isEnabled = false
         contextItem.isEnabled = false
+        statusItemLine.isEnabled = false
         statsItem.isEnabled = false
         nudgeStatsItem.isEnabled = false
 
         menu.addItem(withTitle: "AI-slap", action: nil, keyEquivalent: "").isEnabled = false
+
+        // Clickable, because when this is the problem it's the only thing that matters.
+        permissionItem.target = self
+        permissionItem.action = #selector(fixPermission)
         menu.addItem(permissionItem)
+        menu.addItem(notificationItem)
+
         menu.addItem(.separator())
         menu.addItem(contextItem)
+        menu.addItem(statusItemLine)
         menu.addItem(statsItem)
         menu.addItem(nudgeStatsItem)
         menu.addItem(.separator())
@@ -92,6 +120,12 @@ final class MenuBarController {
         )
         learned.target = self
         menu.addItem(learned)
+
+        let test = NSMenuItem(
+            title: "Send a test nudge", action: #selector(testNudge), keyEquivalent: ""
+        )
+        test.target = self
+        menu.addItem(test)
 
         menu.addItem(.separator())
 
@@ -127,17 +161,33 @@ final class MenuBarController {
     func update(
         context: WindowContext?,
         category: String?,
+        statusLine: String,
         stats: SessionStore.Stats,
         nudgesToday: Int,
         dailyBudget: Int,
         isPaused: Bool,
         nudgesEnabled: Bool,
         sensitivity: InterruptionEngine.Sensitivity,
-        hasAccessibility: Bool
+        hasAccessibility: Bool,
+        notificationsAllowed: Bool
     ) {
+        applyIcon(
+            hasAccessibility: hasAccessibility,
+            notificationsAllowed: notificationsAllowed
+        )
+
         permissionItem.title = hasAccessibility
             ? "Accessibility granted — reading window titles"
-            : "⚠️ No Accessibility permission — app names only"
+            : "⚠️ No Accessibility permission — click to fix"
+        permissionItem.isEnabled = !hasAccessibility
+
+        notificationItem.title = notificationsAllowed
+            ? "Notifications allowed"
+            : "⚠️ Notifications blocked — nudges can't appear"
+        notificationItem.isEnabled = false
+        notificationItem.isHidden = notificationsAllowed && hasAccessibility
+
+        statusItemLine.title = isPaused ? "Paused" : statusLine
 
         if isPaused {
             contextItem.title = "Paused — nothing is being logged"
@@ -180,6 +230,8 @@ final class MenuBarController {
     @objc private func togglePause() { onTogglePause() }
     @objc private func toggleNudges() { onToggleNudges() }
     @objc private func showLearned() { onShowLearned() }
+    @objc private func testNudge() { onTestNudge() }
+    @objc private func fixPermission() { onFixPermission() }
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }

@@ -20,7 +20,20 @@ cd "$(dirname "$0")/.."
 APP_NAME="AISlap"
 BUILD_DIR="build"
 APP="${BUILD_DIR}/${APP_NAME}.app"
-SIGN_IDENTITY="${DEVELOPER_ID:--}"
+LOCAL_IDENTITY="AI-slap Local Dev"
+
+# Identity preference, best first. A stable signature is what keeps the Accessibility
+# permission across rebuilds — with ad-hoc signing macOS revokes it every time the
+# binary changes, and the app goes blind without saying so.
+if [[ -n "${DEVELOPER_ID:-}" ]]; then
+    SIGN_IDENTITY="${DEVELOPER_ID}"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "${LOCAL_IDENTITY}"; then
+    SIGN_IDENTITY="${LOCAL_IDENTITY}"
+else
+    SIGN_IDENTITY="-"
+    echo "!!  Signing ad-hoc. Accessibility will be revoked on every rebuild."
+    echo "!!  Run ./scripts/make-signing-identity.sh once to stop that."
+fi
 
 echo "==> Building ${APP_NAME} (release)"
 swift build -c release

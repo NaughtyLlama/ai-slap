@@ -155,59 +155,129 @@ final class InterruptionEngine {
         fire(candidate, context: context, confidence: decision)
     }
 
-    /// Returns the adjusted confidence if every gate passes, nil otherwise.
-    func shouldFire(_ candidate: CompiledRule, context: WindowContext) -> Double? {
-        guard isEnabled else { return nil }
+    /// Why an interruption did or didn't happen.
+    ///
+    /// The gates return a *reason* rather than a bare nil because silence is this
+    /// product's normal state, which makes "working perfectly" and "completely broken"
+    /// look identical from the outside. The menu shows the reason, so a quiet day is
+    /// legible instead of suspicious.
+    enum Gate {
+        case pass(confidence: Double)
+        case blocked(String)
+    }
+
+    func gate(_ candidate: CompiledRule, context: WindowContext) -> Gate {
+        guard isEnabled else { return .blocked("nudges are switched off") }
 
         let rule = candidate.rule
         let now = Date()
 
-        // 1. Quiet hours.
         let hour = Calendar.current.component(.hour, from: now)
         let inQuietHours = quietHours.start > quietHours.end
             ? (hour >= quietHours.start || hour < quietHours.end)
             : (hour >= quietHours.start && hour < quietHours.end)
-        if inQuietHours { return nil }
-
-        // 2. Daily budget.
-        guard store.firedToday() < dailyBudget else { return nil }
-
-        // 3. AI grace window — fail open. Telling someone they skipped AI right after
-        //    they used it is the fastest uninstall available (docs/02).
-        if let lastAI = lastAIContextAt,
-           now.timeIntervalSince(lastAI) < rule.condition.noAiContextForMs / 1000 {
-            return nil
+        if inQuietHours {
+            return .blocked("quiet hours until \(quietHours.end):00")
         }
 
-        // 4. Per-rule cooldown.
-        if let last = store.lastFired(ruleID: rule.id),
-           now.timeIntervalSince(last) < rule.cooldownMs / 1000 {
-            return nil
+        let firedToday = store.firedToday()
+        guard firedToday < dailyBudget else {
+            return .blocked("daily budget spent (\(firedToday)/\(dailyBudget))")
         }
 
-        // 5. Learned mute.
-        if personalizer.isMuted(rule.id).muted { return nil }
+        // docs/02, fail open. Telling someone they skipped AI right after they used it
+        // is the fastest uninstall available.
+        if let lastAI = lastAIContextAt {
+            let grace = rule.condition.noAiContextForMs / 1000
+            let elapsed = now.timeIntervalSince(lastAI)
+            if elapsed < grace {
+                return .blocked(
+                    "used AI \(short(elapsed)) ago — quiet for another "
+                    + "\(short(grace - elapsed))"
+                )
+            }
+        }
 
-        // 6. Not twice about the same thing.
+        if let last = store.lastFired(ruleID: rule.id) {
+            let cooldown = rule.cooldownMs / 1000
+            let elapsed = now.timeIntervalSince(last)
+            if elapsed < cooldown {
+                return .blocked("\(rule.id) cooling down for \(short(cooldown - elapsed))")
+            }
+        }
+
+        let mute = personalizer.isMuted(rule.id)
+        if mute.muted {
+            return .blocked("\(rule.id) muted — \(mute.reason ?? "learned")")
+        }
+
         let signature = "\(rule.id)|\(context.title ?? context.bundleID)"
-        if interruptedSignatures.contains(signature) { return nil }
+        if interruptedSignatures.contains(signature) {
+            return .blocked("already nudged about this one")
+        }
 
-        // 7. Repetition rules count occurrences instead of dwell.
         if let needed = rule.condition.repeatCount,
            let window = rule.condition.repeatWithinMs {
             let seen = store.sessionCount(
                 category: rule.category, withinLast: window / 1000
             )
-            guard seen >= needed else { return nil }
+            guard seen >= needed else {
+                return .blocked("needs \(needed) in \(short(window / 1000)), seen \(seen)")
+            }
         }
 
-        // 8. Confidence, after personalisation, against the sensitivity setting.
         let adjusted = rule.confidence
             * personalizer.trustMultiplier(for: rule.id)
             * personalizer.receptivityMultiplier(at: now)
-        guard adjusted >= sensitivity.threshold else { return nil }
+        guard adjusted >= sensitivity.threshold else {
+            return .blocked(String(
+                format: "confidence %.2f below %@ threshold %.2f",
+                adjusted, sensitivity.title.lowercased(), sensitivity.threshold
+            ))
+        }
 
-        return adjusted
+        return .pass(confidence: adjusted)
+    }
+
+    /// Returns the adjusted confidence if every gate passes, nil otherwise.
+    func shouldFire(_ candidate: CompiledRule, context: WindowContext) -> Double? {
+        if case .pass(let confidence) = gate(candidate, context: context) {
+            return confidence
+        }
+        return nil
+    }
+
+    /// One line explaining what the engine is doing about the current context.
+    func statusLine(for context: WindowContext?, since start: Date?) -> String {
+        guard isEnabled else { return "Nudges off" }
+        guard let context else { return "Watching…" }
+
+        if isAIContext(context) {
+            return "In an AI app — nothing fires for 10 min after you leave"
+        }
+        guard let candidate = bestRule(for: context) else {
+            return context.title == nil
+                ? "No window title — can't classify this one"
+                : "No rule watches this context"
+        }
+
+        switch gate(candidate, context: context) {
+        case .blocked(let reason):
+            return "Held: \(reason)"
+        case .pass:
+            let threshold = personalizer.dwellThreshold(for: candidate.rule).seconds
+            let elapsed = start.map { Date().timeIntervalSince($0) } ?? 0
+            let remaining = threshold - elapsed
+            return remaining > 0
+                ? "\(candidate.id) in \(short(remaining))"
+                : "\(candidate.id) — firing"
+        }
+    }
+
+    private func short(_ seconds: TimeInterval) -> String {
+        seconds < 60
+            ? "\(Int(seconds.rounded()))s"
+            : "\(Int((seconds / 60).rounded()))m"
     }
 
     // MARK: - Delivery
@@ -246,6 +316,35 @@ final class InterruptionEngine {
     }
 
     var onFire: (() -> Void)?
+
+    /// Fires a real notification through the real delivery path, skipping every gate.
+    /// Deliberately records nothing: a test must not pollute the acceptance history
+    /// the Personaliser learns from.
+    func sendTestNudge() {
+        let content = UNMutableNotificationContent()
+        content.title = "Test nudge — this is what one looks like"
+        content.body = "Nothing was logged. Your real nudges use the same buttons."
+        content.categoryIdentifier = Self.notificationCategory
+        content.sound = nil
+
+        let request = UNNotificationRequest(
+            identifier: "nudge.test.\(UUID().uuidString)", content: content, trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            guard let error else { return }
+            NSLog("AISlap: test notification failed — \(error.localizedDescription)")
+        }
+    }
+
+    /// Whether notifications are actually permitted, so the menu can say so rather
+    /// than leaving the user to infer it from silence.
+    func notificationStatus(_ completion: @escaping (Bool) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let allowed = settings.authorizationStatus == .authorized
+                || settings.authorizationStatus == .provisional
+            DispatchQueue.main.async { completion(allowed) }
+        }
+    }
 
     // MARK: - Responses
 
