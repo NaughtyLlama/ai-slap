@@ -25,9 +25,10 @@ import Foundation
 ///    10am.
 ///
 /// Everything is shrunk toward the rulebook default until there's enough evidence, so
-/// a first run behaves exactly as specced and drifts from there. No learned value is
-/// ever allowed to make the product *more* interrupting than the rulebook alone —
-/// adaptation can widen the fuse but only narrow it within a floor.
+/// a first run behaves exactly as specced and drifts from there. Adaptation can shorten
+/// a threshold well below the rulebook value — that is the whole point for someone who
+/// works in short bursts — bounded only by an absolute floor, and the daily budget and
+/// cooldowns still cap how often anything actually fires.
 final class Personalizer {
 
     private let store: SessionStore
@@ -43,10 +44,20 @@ final class Personalizer {
     /// a long sit. p85 means roughly the top one sit in seven.
     private let dwellPercentile = 0.85
 
-    /// Learned thresholds stay inside these multiples of the rulebook value, so a
-    /// weird week can't produce a rule that fires every thirty seconds or never fires
-    /// at all.
-    private let thresholdBounds = (lower: 0.4, upper: 2.5)
+    /// Learned thresholds may not exceed this multiple of the rulebook value, so an
+    /// unusual week can't push a rule out to never firing.
+    ///
+    /// There is deliberately **no matching lower multiple**. There was — 0.4× — and it
+    /// was wrong in a way that defeated the entire class: it clamped learned thresholds
+    /// *upward*, away from the user. Someone whose real sits average 17 seconds had a
+    /// 19-second learned threshold dragged back to 48, so nothing ever fired and the
+    /// adaptation layer might as well not have existed. Fast workers are exactly who
+    /// personalisation is for. The absolute floor below is the only lower bound needed.
+    private let thresholdCeilingMultiple = 2.5
+
+    /// Nothing counts as parked in less time than this, whatever the maths say.
+    /// Glancing at a window is not deliberation.
+    private let absoluteFloor: TimeInterval = 20
 
     /// Beta prior on "will this person accept this rule". Mean 0.4, weak enough to be
     /// overwhelmed by a couple of dozen real outcomes.
@@ -77,13 +88,9 @@ final class Personalizer {
         }
 
         let personal = percentile(samples, dwellPercentile)
-        let bounded = min(
-            max(personal, base * thresholdBounds.lower),
-            base * thresholdBounds.upper
-        )
+        let bounded = min(personal, base * thresholdCeilingMultiple)
+        let floored = max(bounded, absoluteFloor)
 
-        // Never fire on something shorter than a genuine pause, whatever the maths say.
-        let floored = max(bounded, 20)
         return LearnedThreshold(
             seconds: floored, isLearned: true, sampleCount: samples.count
         )

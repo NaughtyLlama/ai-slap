@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onTogglePause: { [weak self] in self?.togglePause() },
             onToggleNudges: { [weak self] in self?.toggleNudges() },
             onSetSensitivity: { [weak self] in self?.setSensitivity($0) },
+            onSetAmnesty: { [weak self] in self?.setAmnesty($0) },
+            onSetBudget: { [weak self] in self?.setBudget($0) },
             onShowLearned: { [weak self] in self?.showLearned() },
             onTestNudge: { [weak self] in self?.engine?.sendTestNudge() },
             onHandoffNow: { [weak self] in self?.handoffNow() },
@@ -211,6 +213,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         refreshMenu()
     }
 
+    private func setAmnesty(_ amnesty: InterruptionEngine.Amnesty) {
+        engine?.amnesty = amnesty
+        refreshMenu()
+    }
+
+    private func setBudget(_ budget: Int) {
+        engine?.dailyBudget = budget
+        refreshMenu()
+    }
+
     /// A system that quietly retunes itself has to be able to show its work, or the
     /// first surprising silence reads as a bug.
     private func showLearned() {
@@ -332,6 +344,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             isPaused: isPaused,
             nudgesEnabled: engine?.isEnabled ?? false,
             sensitivity: engine?.sensitivity ?? .balanced,
+            amnesty: engine?.amnesty ?? .standard,
+            budget: engine?.dailyBudget ?? 4,
             hasAccessibility: AXIsProcessTrusted(),
             notificationsAllowed: notificationsAllowed,
             hotkeyRegistered: hotkeyRegistered,

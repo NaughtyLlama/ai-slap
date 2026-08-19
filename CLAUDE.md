@@ -52,14 +52,20 @@ The rulebook is generic and identical for everybody, which is what lets it becom
 shared, signed, remotely-updatable artifact `docs/03` requires. Patterns are written
 from published window-title formats — never reverse-engineered from one person's log.
 
+**This is where the product's biggest open question lives.** A heavy AI user generates
+very little for the rulebook to catch — most of their observed time already *is* AI —
+and their manual-work moments are short, interleaved gaps rather than long sits. The
+premise catches people defaulting to manual work; someone who already defaults to AI is
+close to a null case. Worth resolving before drawing a goose.
+
 The Personaliser never leaves the device and adapts three things:
 
 1. **Dwell thresholds** become a high percentile (p85) of *your own* dwell times in
    that category. A fixed 90-second email rule is wrong for nearly everyone: someone
    who clears mail in 20-second bursts never trips it and concludes the app is broken;
    someone who lives in 6-minute threads gets pestered. Bounded to 0.4×–2.5× the
-   rulebook value with a 20s floor, so a strange week can't produce a rule that fires
-   constantly or never.
+   rulebook value, bounded above at 2.5× and below only by a 20s floor. There is
+   deliberately no lower *multiple* — see deviation 7.
 2. **Per-rule trust** — a Beta posterior over accept/dismiss, shrunk toward the
    rulebook default until ~6 resolved outcomes. Below 15% useful over 12+ outcomes the
    rule mutes itself locally, mirroring the remote pull in `docs/03`.
@@ -121,6 +127,20 @@ Where the shipped code knowingly departs from the docs, and why.
 5. **Only AI-native editors count as AI contexts.** `docs/02` accepts treating AI-native
    editors as AI wholesale. That reasoning does not extend to general editors: listing
    VS Code would silence the product for anyone who writes code all day.
+6. **The AI amnesty is a user setting, and can be switched off entirely.** `docs/02`
+   fixes it at 10 minutes and calls it fail-open. That holds for occasional AI users and
+   **inverts for heavy ones**: their pattern is to start something with AI and move to
+   another window while it runs, so the amnesty blinds the product to its single best
+   trigger and goes silent for its most engaged users — the opposite of what fail-open
+   was for. The escape hatch `docs/02` actually depends on is the "I already did"
+   button, which is on every nudge regardless of this setting. With the amnesty off, an
+   AI context no longer clears the already-nudged set either, or passing through Claude
+   would re-arm every context the user had just declined.
+7. **Learned thresholds have no lower bound beyond a 20s floor.** They were clamped to
+   0.4×–2.5× of the rulebook value, which defeated the point: a user whose real sits
+   average 17 seconds had a learned 19s threshold dragged back up to 48s, so nothing
+   ever fired. Fast workers are precisely who personalisation exists for. The ceiling
+   stays; the daily budget and per-rule cooldowns are what actually cap firing rate.
 
 ## Open questions — marked ⚠️ throughout the docs
 

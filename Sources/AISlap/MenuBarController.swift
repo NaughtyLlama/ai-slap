@@ -17,10 +17,14 @@ final class MenuBarController {
     private let nudgeToggleItem = NSMenuItem()
     private let pauseItem = NSMenuItem()
     private var sensitivityItems: [InterruptionEngine.Sensitivity: NSMenuItem] = [:]
+    private var amnestyItems: [InterruptionEngine.Amnesty: NSMenuItem] = [:]
+    private var budgetItems: [Int: NSMenuItem] = [:]
 
     private let onTogglePause: () -> Void
     private let onToggleNudges: () -> Void
     private let onSetSensitivity: (InterruptionEngine.Sensitivity) -> Void
+    private let onSetAmnesty: (InterruptionEngine.Amnesty) -> Void
+    private let onSetBudget: (Int) -> Void
     private let onShowLearned: () -> Void
     private let onTestNudge: () -> Void
     private let onHandoffNow: () -> Void
@@ -33,6 +37,8 @@ final class MenuBarController {
         onTogglePause: @escaping () -> Void,
         onToggleNudges: @escaping () -> Void,
         onSetSensitivity: @escaping (InterruptionEngine.Sensitivity) -> Void,
+        onSetAmnesty: @escaping (InterruptionEngine.Amnesty) -> Void,
+        onSetBudget: @escaping (Int) -> Void,
         onShowLearned: @escaping () -> Void,
         onTestNudge: @escaping () -> Void,
         onHandoffNow: @escaping () -> Void,
@@ -44,6 +50,8 @@ final class MenuBarController {
         self.onTogglePause = onTogglePause
         self.onToggleNudges = onToggleNudges
         self.onSetSensitivity = onSetSensitivity
+        self.onSetAmnesty = onSetAmnesty
+        self.onSetBudget = onSetBudget
         self.onShowLearned = onShowLearned
         self.onTestNudge = onTestNudge
         self.onHandoffNow = onHandoffNow
@@ -118,6 +126,37 @@ final class MenuBarController {
         sensitivityRoot.submenu = sensitivityMenu
         menu.addItem(sensitivityRoot)
 
+        let amnestyMenu = NSMenu()
+        for amnesty in InterruptionEngine.Amnesty.allCases {
+            let item = NSMenuItem(
+                title: amnesty.title, action: #selector(setAmnesty(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = amnesty.rawValue
+            amnestyMenu.addItem(item)
+            amnestyItems[amnesty] = item
+        }
+        let amnestyRoot = NSMenuItem(
+            title: "Pause after I use AI", action: nil, keyEquivalent: ""
+        )
+        amnestyRoot.submenu = amnestyMenu
+        menu.addItem(amnestyRoot)
+
+        let budgetMenu = NSMenu()
+        for budget in [4, 8, 15, 40] {
+            let item = NSMenuItem(
+                title: "\(budget) a day", action: #selector(setBudget(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = budget
+            budgetMenu.addItem(item)
+            budgetItems[budget] = item
+        }
+        let budgetRoot = NSMenuItem(title: "How many, max?", action: nil, keyEquivalent: "")
+        budgetRoot.submenu = budgetMenu
+        menu.addItem(budgetRoot)
+
         let learned = NSMenuItem(
             title: "What it's learned about you…",
             action: #selector(showLearned), keyEquivalent: ""
@@ -187,6 +226,8 @@ final class MenuBarController {
         isPaused: Bool,
         nudgesEnabled: Bool,
         sensitivity: InterruptionEngine.Sensitivity,
+        amnesty: InterruptionEngine.Amnesty,
+        budget: Int,
         hasAccessibility: Bool,
         notificationsAllowed: Bool,
         hotkeyRegistered: Bool,
@@ -245,6 +286,12 @@ final class MenuBarController {
         for (key, item) in sensitivityItems {
             item.state = key == sensitivity ? .on : .off
         }
+        for (key, item) in amnestyItems {
+            item.state = key == amnesty ? .on : .off
+        }
+        for (key, item) in budgetItems {
+            item.state = key == budget ? .on : .off
+        }
 
         pauseItem.title = isPaused ? "Resume logging" : "Pause logging"
         statusItem.button?.appearsDisabled = isPaused
@@ -269,6 +316,18 @@ final class MenuBarController {
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }
+
+    @objc private func setAmnesty(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let amnesty = InterruptionEngine.Amnesty(rawValue: raw)
+        else { return }
+        onSetAmnesty(amnesty)
+    }
+
+    @objc private func setBudget(_ sender: NSMenuItem) {
+        guard let budget = sender.representedObject as? Int else { return }
+        onSetBudget(budget)
+    }
 
     @objc private func setSensitivity(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,

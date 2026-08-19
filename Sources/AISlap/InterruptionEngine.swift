@@ -31,8 +31,53 @@ final class InterruptionEngine {
         }
     }
 
+    /// How long after touching an AI app nothing may fire.
+    ///
+    /// docs/02 sets this at 10 minutes and calls it fail-open: accusing someone of
+    /// skipping AI right after they used it is the fastest uninstall available. That
+    /// reasoning holds for someone who uses AI occasionally.
+    ///
+    /// It inverts for someone who works *inside* AI all day. Their pattern is to start
+    /// something with AI, then move to another window while it runs — and that move is
+    /// the exact moment worth catching. A blanket amnesty makes the product blind to
+    /// its best trigger and silent for its most engaged users.
+    ///
+    /// So it is a setting rather than a constant. "I already did" stays on every nudge
+    /// regardless, which keeps the fail-open escape hatch docs/02 actually depends on.
+    enum Amnesty: String, CaseIterable {
+        case off, brief, standard
+
+        var title: String {
+            switch self {
+            case .off:      return "None — nudge me anyway"
+            case .brief:    return "2 minutes"
+            case .standard: return "10 minutes (default)"
+            }
+        }
+
+        /// Seconds of silence after AI use. `ruleDefault` comes from the rulebook.
+        func seconds(ruleDefault: TimeInterval) -> TimeInterval {
+            switch self {
+            case .off:      return 0
+            case .brief:    return 120
+            case .standard: return ruleDefault
+            }
+        }
+    }
+
+    var amnesty: Amnesty {
+        get {
+            let raw = UserDefaults.standard.string(forKey: "amnesty") ?? ""
+            return Amnesty(rawValue: raw) ?? .standard
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "amnesty") }
+    }
+
     /// docs/03: hard cap, four a day. The single most important nag-fatigue control.
-    var dailyBudget = 4
+    var dailyBudget: Int {
+        get { UserDefaults.standard.object(forKey: "dailyBudget") as? Int ?? 4 }
+        set { UserDefaults.standard.set(newValue, forKey: "dailyBudget") }
+    }
 
     /// Nothing fires outside these hours.
     var quietHours: (start: Int, end: Int) = (22, 8)
@@ -119,8 +164,12 @@ final class InterruptionEngine {
         if isAIContext(context) {
             // docs/02: any AI surface opens a grace window and clears the
             // already-interrupted set, because the user just did the thing.
+            //
+            // With the amnesty off, clearing that set would re-arm every context the
+            // user already declined — and someone with the amnesty off passes through
+            // AI constantly, so the same email would nag on every return trip.
             lastAIContextAt = Date()
-            interruptedSignatures.removeAll()
+            if amnesty != .off { interruptedSignatures.removeAll() }
             return
         }
 
@@ -193,10 +242,9 @@ final class InterruptionEngine {
             return .blocked("daily budget spent (\(firedToday)/\(dailyBudget))")
         }
 
-        // docs/02, fail open. Telling someone they skipped AI right after they used it
-        // is the fastest uninstall available.
-        if let lastAI = lastAIContextAt {
-            let grace = rule.condition.noAiContextForMs / 1000
+        // docs/02, fail open — subject to the user's amnesty setting above.
+        let grace = amnesty.seconds(ruleDefault: rule.condition.noAiContextForMs / 1000)
+        if grace > 0, let lastAI = lastAIContextAt {
             let elapsed = now.timeIntervalSince(lastAI)
             if elapsed < grace {
                 return .blocked(
