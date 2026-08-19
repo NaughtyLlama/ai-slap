@@ -7,6 +7,16 @@ task to Claude in one gesture.
 **This file mirrors [`CLAUDE.md`](CLAUDE.md) so non-Claude agents route the same way. Keep
 the two in sync — if you change one, change the other.**
 
+## Current state — read [`HANDOFF.md`](HANDOFF.md) first
+
+**`HANDOFF.md` is where the session state lives**: what works right now, Chen's settings
+and why they are non-default, what to check first, and what to pick up next. It is
+rewritten at the end of every working session.
+
+This file is the opposite — durable orientation that should rarely change. **Do not put
+dated state, current settings, or next steps here.** They go stale silently and then
+mislead, which is worse than not being written down at all.
+
 ## Start here
 
 Read [`README.md`](README.md) first, then the docs in order. `docs/02` (detection) and
@@ -159,76 +169,25 @@ Where the shipped code knowingly departs from the docs, and why.
 4. Pricing in `docs/01` is a placeholder, not validated.
 5. AI deep-link URL parameters change — verify against vendor docs at build time.
 
-## What happens next
+## The gate that was skipped, and what it costs
 
-The formal `docs/08` gate — two weeks, five people, hand-labelled precision — was
-**deliberately skipped by the owner as too heavy for this stage.** What replaced it: one
-person's real log confirmed that Gmail titles separate "one open message" from "inbox"
-cleanly, which was the assumption the gate existed to protect. Rules were written from
-published title formats, then checked against that log. Treat the precision numbers as
-unmeasured, because they are.
+The formal `docs/08` decision gate — two weeks, five people, hand-labelled precision —
+was **deliberately skipped by the owner as too heavy for this stage.** What replaced it:
+one person's real log confirmed that Gmail titles separate "one open message" from
+"inbox" cleanly, which was the assumption the gate existed to protect. Rules were written
+from published title formats and then checked against that log.
 
-Next is the mascot (`docs/04`) and the handoff (`docs/05`). **Commission character art on
-day one of that phase** — it has lead time engineering doesn't. Until the handoff exists,
-accepting a nudge only brings the AI app forward, which understates acceptance.
+**Treat every precision number as unmeasured, because it is.** Nothing here has been
+validated against hand-labels, and no second user has ever run it. Say so plainly rather
+than implying the rules are known-good.
 
-Distribution is blocked on an Apple Developer ID. Until then builds are ad-hoc signed and
-macOS may drop the Accessibility grant on rebuild, since TCC keys the permission to the
-code signature.
+Distribution is blocked on an Apple Developer ID; the local self-signed identity fixes
+the development loop only.
 
-## Where we left off — 2026-08-19
+## Traps that already cost a day
 
-Everything below is committed and pushed. The app is built, signed and running on
-Chen's machine.
-
-**Working end to end:** detection, the rules engine, on-device personalisation, the
-handoff (⌥Space, or "Hand it over" on a nudge), and the panel. ~950 sessions logged,
-~92% carrying a window title. Four nudges have fired; one was accepted and completed a
-real handoff.
-
-**Chen's settings, and why** — he is a heavy AI user and deliberately non-default:
-
-| Setting | Value | Reason |
-|---|---|---|
-| Pause after AI use | **off** | He starts work with AI then switches windows while it runs. That switch is the moment worth catching; the amnesty hid exactly it. |
-| How pushy | pushy | Wants volume while testing. |
-| Max per day | 15 | 4 was too quiet for someone asking to be nudged. |
-| Show nudges as | panel | Notifications auto-dismissed before he could read four buttons. |
-
-**First thing to check next session.** If the menu-bar icon is a red triangle, or logged
-`window_title` values are NULL, Accessibility was dropped — re-add the app in Privacy &
-Security. That should now be rare: signing uses a stable identity, and the keychain
-partition list is set so `codesign` runs unattended. Verify a build actually signed
-rather than trusting a pipeline exit code; a failed signing once slipped through `tail`
-and shipped an ad-hoc binary that silently lost the permission.
-
-**Ask Chen how it has felt in use.** The metric that matters is acceptance, not volume.
-`rule_events` holds the truth, and "What it's learned about you…" in the menu prints the
-learned state.
-
-### Open, in the order they matter
-
-1. **Is there a product here for a heavy AI user?** See the note above the Personaliser
-   section. Most of Chen's observed time already *is* AI, and his manual moments are
-   short interleaved gaps rather than long sits. Turning the amnesty off made the app
-   speak; whether what it says is *useful* is the real test, and it is unresolved.
-2. **The mascot.** Chen is building the character himself rather than commissioning art,
-   which removes the animator cost line in `docs/08` and the commission timing in the
-   Phase 1 plan. `NudgePanel` is its window already — behaviour, placement and buttons
-   are done, so the character drops in without touching the rest. The escalation ladder
-   in `docs/04` (tiers 0–2 first) is not built.
-3. **Camera and microphone suppression.** The other half of the `docs/04` detection, and
-   the reason the panel must not be trusted around screen shares yet: frontmost-app
-   detection catches Zoom, not a browser tab sharing a screen. Deliberately deferred
-   because touching `AVCaptureDevice` can raise its own permission prompt. Until then,
-   ⌥⌘G before any demo.
-4. **`timer.checkin`** is written and disabled in the rulebook. `docs/03` calls it the
-   fallback that keeps the product useful while confidence rules are tuned — which is
-   exactly the current situation. Cheap to try.
-5. **Apple Developer ID.** Still the blocker on anyone but Chen running this. The local
-   self-signed identity solves the dev loop only.
-
-### Things that cost time before, so don't rediscover them
+Permanent, not session state. Each of these produced a bug that looked like
+something else entirely.
 
 - Swift's synthesised `Decodable` throws on a missing key rather than using a property
   default. Any optional rulebook field needs explicit `decodeIfPresent`.
@@ -242,6 +201,7 @@ learned state.
 - OpenSSL 3 writes a PKCS#12 macOS refuses to import; `-legacy` and a non-empty
   passphrase are both required.
 
+
 ## Conventions
 
 - Specs live in `docs/`, numbered. Keep them updated as decisions change — a stale spec
@@ -249,3 +209,9 @@ learned state.
 - ⚠️ marks an unvalidated assumption or a decision needing external verification. Preserve
   the marker until it's actually resolved.
 - No network code in the client target. Not stubbed — absent, until Phase 2.
+- **State goes in `HANDOFF.md`, not here.** This file, `AGENTS.md` and `docs/` are
+  durable; `HANDOFF.md` is the only file that describes the present moment. Rewrite it at
+  the end of a working session rather than appending to it — a log of past sessions is
+  not a handoff.
+- `AGENTS.md` is a generated mirror of this file. Edit `CLAUDE.md`, then copy it across
+  with the header line swapped.
