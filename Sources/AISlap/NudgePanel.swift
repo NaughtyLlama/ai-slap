@@ -83,16 +83,22 @@ final class NudgePanel {
     // MARK: - Layout
 
     private func buildContent(copy: String, prompt: String, width: CGFloat) -> NSView {
-        let background = NSVisualEffectView()
-        background.material = .hudWindow
-        background.blendingMode = .behindWindow
-        background.state = .active
+        // Deliberately **not** a translucent material with behind-window blending.
+        // That samples the desktop, so the panel took its lightness from whatever
+        // happened to be underneath while the text colour stayed put: legible over a
+        // dark window, washed out to near-invisible over a white one. An interruption
+        // has to be readable over any backdrop, so the background is opaque and drawn
+        // from dynamic system colours that follow light and dark mode on their own.
+        let background = AdaptiveBackgroundView()
         background.wantsLayer = true
         background.layer?.cornerRadius = 14
         background.layer?.masksToBounds = true
+        background.layer?.borderWidth = 1
+        background.updateColors()
 
         let title = NSTextField(labelWithString: copy)
         title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.textColor = .labelColor
         title.lineBreakMode = .byWordWrapping
         title.maximumNumberOfLines = 3
         title.preferredMaxLayoutWidth = width - 32
@@ -145,12 +151,25 @@ final class NudgePanel {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .regular
-        if primary {
-            button.keyEquivalent = "\r"
-            button.bezelColor = .controlAccentColor
-        } else {
+
+        guard primary else {
             button.font = .systemFont(ofSize: 11)
+            return button
         }
+
+        // A non-activating panel never becomes key, so AppKit never draws the default
+        // button in the accent colour — the primary action came out looking as
+        // inert as "Not now". Colour it explicitly, and set the title colour with it,
+        // since white-on-accent is not what the label colour would give in light mode.
+        button.keyEquivalent = "\r"
+        button.bezelColor = .controlAccentColor
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .foregroundColor: NSColor.white,
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            ]
+        )
         return button
     }
 
@@ -181,4 +200,25 @@ final class NudgePanel {
     @objc private func tapAlreadyDid() { respond(.alreadyDid) }
     @objc private func tapDismiss() { respond(.dismiss) }
     @objc private func tapMute() { respond(.mute) }
+}
+
+
+private extension NSView {
+    /// Layer colours are raw CGColors and do not follow appearance changes on their
+    /// own, so they are resolved against the view's current appearance and refreshed
+    /// whenever that changes.
+    func updateColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+    }
+}
+
+/// A container that keeps its layer colours correct across light/dark switches.
+final class AdaptiveBackgroundView: NSView {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
 }
