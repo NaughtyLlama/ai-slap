@@ -14,8 +14,8 @@ Read [`README.md`](README.md) first, then the docs in order. `docs/02` (detectio
 
 ## Where the code is
 
-Phase 0 (the `docs/08` signal spike) and the rules engine (`docs/03`) are built.
-No mascot, no backend, no accounts, no handoff.
+Phase 0 (the `docs/08` signal spike), the rules engine (`docs/03`) and the handoff
+(`docs/05`) are built. No mascot, no backend, no accounts.
 
 ```
 Package.swift                          SwiftPM manifest (no Xcode project by design)
@@ -29,10 +29,16 @@ Sources/AISlap/
   Rulebook.swift                       rule schema, loading, compiled matching
   Personalizer.swift                   per-user adaptation (see below)
   InterruptionEngine.swift             gating + notification delivery
+  Handoff.swift                        capture → prompt → clipboard → paste
+  WindowCapture.swift                  ScreenCaptureKit, one window only
+  AIDestination.swift                  where a handoff goes
+  Pasteboard.swift                     staging, restore, synthesised keystrokes
+  GlobalHotkey.swift                   ⌥Space via Carbon
   MenuBarController.swift              the entire UI
 Resources/rulebook.json                baked-in default rulebook
 Resources/Info.plist                   LSUIElement, bundle ID, version
 scripts/build-app.sh                   source → AISlap.app, Command Line Tools only
+scripts/make-signing-identity.sh       run once; stops rebuilds revoking Accessibility
 ```
 
 Build and run:
@@ -63,9 +69,9 @@ The Personaliser never leaves the device and adapts three things:
 1. **Dwell thresholds** become a high percentile (p85) of *your own* dwell times in
    that category. A fixed 90-second email rule is wrong for nearly everyone: someone
    who clears mail in 20-second bursts never trips it and concludes the app is broken;
-   someone who lives in 6-minute threads gets pestered. Bounded to 0.4×–2.5× the
-   rulebook value, bounded above at 2.5× and below only by a 20s floor. There is
-   deliberately no lower *multiple* — see deviation 7.
+   someone who lives in 6-minute threads gets pestered. Bounded above at 2.5× the
+   rulebook value and below only by a 20s floor — deliberately no lower *multiple*,
+   see deviation 7.
 2. **Per-rule trust** — a Beta posterior over accept/dismiss, shrunk toward the
    rulebook default until ~6 resolved outcomes. Below 15% useful over 12+ outcomes the
    rule mutes itself locally, mirroring the remote pull in `docs/03`.
