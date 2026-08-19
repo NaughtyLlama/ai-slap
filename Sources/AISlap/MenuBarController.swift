@@ -19,6 +19,8 @@ final class MenuBarController {
     private var sensitivityItems: [InterruptionEngine.Sensitivity: NSMenuItem] = [:]
     private var amnestyItems: [InterruptionEngine.Amnesty: NSMenuItem] = [:]
     private var budgetItems: [Int: NSMenuItem] = [:]
+    private var styleItems: [InterruptionEngine.Style: NSMenuItem] = [:]
+    private let panicItem = NSMenuItem()
 
     private let onTogglePause: () -> Void
     private let onToggleNudges: () -> Void
@@ -27,6 +29,8 @@ final class MenuBarController {
     private let onSetBudget: (Int) -> Void
     private let onShowLearned: () -> Void
     private let onTestNudge: () -> Void
+    private let onSetStyle: (InterruptionEngine.Style) -> Void
+    private let onTogglePanic: () -> Void
     private let onHandoffNow: () -> Void
     private let onFixPermission: () -> Void
     private let onExport: () -> Void
@@ -41,6 +45,8 @@ final class MenuBarController {
         onSetBudget: @escaping (Int) -> Void,
         onShowLearned: @escaping () -> Void,
         onTestNudge: @escaping () -> Void,
+        onSetStyle: @escaping (InterruptionEngine.Style) -> Void,
+        onTogglePanic: @escaping () -> Void,
         onHandoffNow: @escaping () -> Void,
         onFixPermission: @escaping () -> Void,
         onExport: @escaping () -> Void,
@@ -54,6 +60,8 @@ final class MenuBarController {
         self.onSetBudget = onSetBudget
         self.onShowLearned = onShowLearned
         self.onTestNudge = onTestNudge
+        self.onSetStyle = onSetStyle
+        self.onTogglePanic = onTogglePanic
         self.onHandoffNow = onHandoffNow
         self.onFixPermission = onFixPermission
         self.onExport = onExport
@@ -126,6 +134,20 @@ final class MenuBarController {
         sensitivityRoot.submenu = sensitivityMenu
         menu.addItem(sensitivityRoot)
 
+        let styleMenu = NSMenu()
+        for style in InterruptionEngine.Style.allCases {
+            let item = NSMenuItem(
+                title: style.title, action: #selector(setStyle(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = style.rawValue
+            styleMenu.addItem(item)
+            styleItems[style] = item
+        }
+        let styleRoot = NSMenuItem(title: "Show nudges as", action: nil, keyEquivalent: "")
+        styleRoot.submenu = styleMenu
+        menu.addItem(styleRoot)
+
         let amnestyMenu = NSMenu()
         for amnesty in InterruptionEngine.Amnesty.allCases {
             let item = NSMenuItem(
@@ -187,6 +209,11 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        // docs/04 ships this as a hotkey and a menu item, both instant.
+        panicItem.target = self
+        panicItem.action = #selector(togglePanic)
+        menu.addItem(panicItem)
+
         pauseItem.target = self
         pauseItem.action = #selector(togglePause)
         menu.addItem(pauseItem)
@@ -227,6 +254,8 @@ final class MenuBarController {
         nudgesEnabled: Bool,
         sensitivity: InterruptionEngine.Sensitivity,
         amnesty: InterruptionEngine.Amnesty,
+        style: InterruptionEngine.Style,
+        isPanicked: Bool,
         budget: Int,
         hasAccessibility: Bool,
         notificationsAllowed: Bool,
@@ -286,6 +315,12 @@ final class MenuBarController {
         for (key, item) in sensitivityItems {
             item.state = key == sensitivity ? .on : .off
         }
+        for (key, item) in styleItems {
+            item.state = key == style ? .on : .off
+        }
+        panicItem.title = isPanicked
+            ? "Hidden — click to resume"
+            : "Hide for 30 minutes  (\u{2325}\u{2318}G)"
         for (key, item) in amnestyItems {
             item.state = key == amnesty ? .on : .off
         }
@@ -316,6 +351,15 @@ final class MenuBarController {
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }
+
+    @objc private func togglePanic() { onTogglePanic() }
+
+    @objc private func setStyle(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let style = InterruptionEngine.Style(rawValue: raw)
+        else { return }
+        onSetStyle(style)
+    }
 
     @objc private func setAmnesty(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,

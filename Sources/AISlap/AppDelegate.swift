@@ -15,7 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private var isPaused = false
     private var menuRefreshTimer: Timer?
     private var notificationsAllowed = false
-    private let hotkey = GlobalHotkey()
+    private let hotkeys = GlobalHotkeys()
+    private let nudgePanel = NudgePanel()
     private var hotkeyRegistered = false
     private var hotkeyPresses = 0
 
@@ -43,7 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onSetAmnesty: { [weak self] in self?.setAmnesty($0) },
             onSetBudget: { [weak self] in self?.setBudget($0) },
             onShowLearned: { [weak self] in self?.showLearned() },
-            onTestNudge: { [weak self] in self?.engine?.sendTestNudge() },
+            onTestNudge: { [weak self] in self?.testNudge() },
+            onSetStyle: { [weak self] in self?.setStyle($0) },
+            onTogglePanic: { [weak self] in self?.togglePanic() },
             onHandoffNow: { [weak self] in self?.handoffNow() },
             onFixPermission: { [weak self] in self?.openAccessibilitySettings() },
             onExport: { [weak self] in self?.export() },
@@ -69,13 +72,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
         // docs/05 entry point 1. Entry point 2 is the notification's "Hand it over";
         // the goose-drag is Phase 1.
-        hotkeyRegistered = hotkey.register(onPress: { [weak self] in
+        hotkeyRegistered = hotkeys.register(
+            id: GlobalHotkeys.handoffID, keyCode: 49, modifiers: 2048  // Option-Space
+        ) { [weak self] in
             self?.hotkeyPresses += 1
             self?.handoffNow()
             self?.refreshMenu()
-        })
+        }
         if !hotkeyRegistered {
             NSLog("AISlap: could not register Option-Space — something else owns it.")
+        }
+
+        // docs/04: users need to trust they can make it vanish in one keystroke, or
+        // they won't run it at all.
+        hotkeys.register(
+            id: GlobalHotkeys.panicID, keyCode: 5, modifiers: 2048 | 256  // Opt-Cmd-G
+        ) { [weak self] in
+            self?.panicHide()
+        }
+
+        engine?.onPresentPanel = { [weak self] copy, prompt, eventID, ruleID in
+            self?.presentPanel(copy: copy, prompt: prompt, eventID: eventID)
         }
 
         UNUserNotificationCenter.current().delegate = self
@@ -236,6 +253,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         alert.runModal()
     }
 
+    /// The panel is presented here rather than in the engine: the engine decides
+    /// whether to interrupt, the app layer owns what that looks like. Swapping the
+    /// panel for the mascot later touches only this file and NudgePanel.
+    private func presentPanel(copy: String, prompt: String, eventID: Int64) {
+        nudgePanel.show(copy: copy, prompt: prompt) { [weak self] response in
+            let outcome: SessionStore.Outcome
+            switch response {
+            case .accept:     outcome = .accepted
+            case .alreadyDid: outcome = .alreadyDid
+            case .mute:       outcome = .muted
+            // An ignored panel is a soft no, not silence: docs/03 wants it feeding the
+            // backoff, or a rule nobody engages with never learns that.
+            case .dismiss, .ignored: outcome = .dismissed
+            }
+            self?.engine?.recordPanelOutcome(outcome, eventID: eventID)
+            self?.refreshMenu()
+        }
+    }
+
+    /// Fires through the real presentation path, skipping every gate, and records
+    /// nothing — a test must not pollute the history the Personaliser learns from.
+    private func testNudge() {
+        guard let engine else { return }
+        guard engine.style == .panel else {
+            engine.sendTestNudge()
+            return
+        }
+        nudgePanel.show(
+            copy: "Test nudge — this is what one looks like",
+            prompt: "Nothing was logged. Your real nudges use these same buttons."
+        ) { _ in }
+    }
+
+    private func setStyle(_ style: InterruptionEngine.Style) {
+        engine?.style = style
+        refreshMenu()
+    }
+
+    private func togglePanic() {
+        guard let engine else { return }
+        if engine.suppression.isPanicked {
+            engine.suppression.cancelPanic()
+            refreshMenu()
+        } else {
+            panicHide()
+        }
+    }
+
+    private func panicHide() {
+        guard let engine else { return }
+        nudgePanel.close()
+        engine.suppression.panic()
+        notify(
+            title: "Hidden for 30 minutes",
+            body: "Nothing will interrupt you. Turn it back on from the menu."
+        )
+        refreshMenu()
+    }
+
     private func handoffNow() {
         engine?.handoffFrontmostWindow(title: currentContext?.title)
     }
@@ -345,6 +421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             nudgesEnabled: engine?.isEnabled ?? false,
             sensitivity: engine?.sensitivity ?? .balanced,
             amnesty: engine?.amnesty ?? .standard,
+            style: engine?.style ?? .panel,
+            isPanicked: engine?.suppression.isPanicked ?? false,
             budget: engine?.dailyBudget ?? 4,
             hasAccessibility: AXIsProcessTrusted(),
             notificationsAllowed: notificationsAllowed,

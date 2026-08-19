@@ -12,7 +12,12 @@ struct Rulebook: Decodable {
     let aiContexts: AIContexts
     let browserBundleIds: [String]
     let destinations: [AIDestination]
+    let suppression: SuppressionConfig
     let rules: [Rule]
+
+    struct SuppressionConfig: Decodable {
+        let conferencingBundleIds: [String]
+    }
 
     struct AIContexts: Decodable {
         /// Native AI clients, matched exactly on bundle ID.

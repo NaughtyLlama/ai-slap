@@ -65,6 +65,30 @@ final class InterruptionEngine {
         }
     }
 
+    /// docs/04 requires a mascot-free path: some people will hate the character,
+    /// enterprise will demand it, and it is the headless route the rules engine already
+    /// targets. Here it is the notification path, kept working rather than deleted.
+    enum Style: String, CaseIterable {
+        case panel, notification
+
+        var title: String {
+            switch self {
+            case .panel:        return "Panel that waits for you"
+            case .notification: return "System notification"
+            }
+        }
+    }
+
+    var style: Style {
+        get {
+            let raw = UserDefaults.standard.string(forKey: "style") ?? ""
+            return Style(rawValue: raw) ?? .panel
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "style") }
+    }
+
+    let suppression: Suppression
+
     var amnesty: Amnesty {
         get {
             let raw = UserDefaults.standard.string(forKey: "amnesty") ?? ""
@@ -128,6 +152,9 @@ final class InterruptionEngine {
             CompiledRule(rule: $0, browserBundleIds: rulebook.browserBundleIds)
         }
         self.handoff = Handoff(destinations: rulebook.destinations)
+        self.suppression = Suppression(
+            conferencingBundleIDs: rulebook.suppression.conferencingBundleIds
+        )
         self.aiBundleIDs = Set(rulebook.aiContexts.bundleIds)
         self.aiBrowserTitlePatterns = rulebook.aiContexts.browserTitlePatterns
             .compactMap(CompiledRule.compile)
@@ -225,6 +252,14 @@ final class InterruptionEngine {
 
     func gate(_ candidate: CompiledRule, context: WindowContext) -> Gate {
         guard isEnabled else { return .blocked("nudges are switched off") }
+
+        // First, because docs/04 treats appearing during a screen share as the anecdote
+        // that kills the company. Hiding needlessly costs nothing; failing to hide once
+        // costs the account.
+        let verdict = suppression.check()
+        if verdict.suppressed {
+            return .blocked(verdict.reason ?? "suppressed")
+        }
 
         let rule = candidate.rule
         let now = Date()
@@ -355,6 +390,12 @@ final class InterruptionEngine {
             )
         }
 
+        if style == .panel, let onPresentPanel {
+            onPresentPanel(rule.nudge.copy, rule.nudge.promptTemplate, eventID, rule.id)
+            onFire?()
+            return
+        }
+
         let identifier = "nudge.\(eventID)"
         pendingEventIDs[identifier] = eventID
 
@@ -378,6 +419,9 @@ final class InterruptionEngine {
     }
 
     var onFire: (() -> Void)?
+
+    /// Asks the app layer to show the panel: copy, prompt, event id, rule id.
+    var onPresentPanel: ((String, String, Int64, String) -> Void)?
 
     /// Fires a real notification through the real delivery path, skipping every gate.
     /// Deliberately records nothing: a test must not pollute the acceptance history
@@ -441,6 +485,12 @@ final class InterruptionEngine {
             options: []
         )
         UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
+    func recordPanelOutcome(_ outcome: SessionStore.Outcome, eventID: Int64) {
+        store.updateOutcome(eventID: eventID, to: outcome)
+        if outcome == .accepted { runHandoff(for: eventID) }
+        if outcome == .alreadyDid { lastAIContextAt = Date() }
     }
 
     func handleResponse(actionIdentifier: String, eventID: Int64, ruleID: String) {

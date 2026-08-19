@@ -56,6 +56,32 @@
     ]
   },
 
+  "suppression": {
+    "_comment": [
+      "docs/04: the mascot must vanish during anything being watched by other people.",
+      "There is no clean public API for 'someone is screen-sharing right now', so this",
+      "is a conservative allowlist plus the panic hotkey, and it accepts false-positive",
+      "hiding — hiding when you didn't need to costs nothing, failing to hide once",
+      "costs the account.",
+      "",
+      "GAP: camera/microphone in-use state is not checked yet. It is the other half of",
+      "the docs/04 detection and should be added deliberately, since touching",
+      "AVCaptureDevice can surface a permission prompt of its own."
+    ],
+    "conferencingBundleIds": [
+      "us.zoom.xos",
+      "com.microsoft.teams2",
+      "com.cisco.webexmeetingsapp",
+      "com.google.Chrome.app.meet",
+      "com.hnc.Discord",
+      "com.obsproject.obs-studio",
+      "com.apple.QuickTimePlayerX",
+      "com.loom.desktop",
+      "com.apple.iChat",
+      "com.tinyspeck.slackmacgap.huddle"
+    ]
+  },
+
   "destinations": [
     {
       "id": "claude",
