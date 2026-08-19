@@ -103,10 +103,11 @@ final class Handoff {
             // Steps 3 and 4. The prompt is the rule's template verbatim: docs/05
             // forbids interpolating anything from the screen, and the window title in
             // particular is already reduced to a category token and discarded.
-            let staged = Pasteboard.stage(text: target.prompt, image: image)
+            let staged = Pasteboard.beginStaging()
 
             // Step 5.
             guard let opened = destination.open() else {
+                Pasteboard.put(text: target.prompt)
                 staged.keepPayload()
                 finish(.clipboardOnly(reason: "couldn't open \(destination.name)"))
                 return
@@ -118,21 +119,46 @@ final class Handoff {
             self.whenFrontmost(opened.bundleID, timeout: timeout, settle: settle) {
                 arrived in
                 guard arrived else {
+                    Pasteboard.put(text: target.prompt)
                     staged.keepPayload()
                     finish(.clipboardOnly(
                         reason: "\(destination.name) didn't come forward in time"
                     ))
                     return
                 }
-                // Step 6. Paste only. Never Return — the user reads what is about to be
-                // sent and sends it themselves. Non-negotiable in docs/05.
-                guard Pasteboard.synthesizePaste() else {
-                    staged.keepPayload()
-                    finish(.clipboardOnly(reason: "paste didn't go through"))
-                    return
+
+                Task { @MainActor in
+                    // A handoff belongs in a fresh conversation. Pasting into whatever
+                    // thread was last open drops unrelated context into it, which is
+                    // both confusing and a small privacy problem of its own.
+                    if let shortcut = destination.newChatShortcut,
+                       let (key, flags) = Keyboard.parse(shortcut) {
+                        Keyboard.press(keyCode: key, flags: flags)
+                        try? await Task.sleep(for: .milliseconds(600))
+                    }
+
+                    // Image and text are pasted separately. One combined write makes
+                    // two pasteboard items and composers read only the first, which is
+                    // exactly how the prompt arrived without its screenshot.
+                    var pastedImage = false
+                    if let image, destination.acceptsPastedImage {
+                        Pasteboard.put(image: image)
+                        pastedImage = Pasteboard.synthesizePaste()
+                        try? await Task.sleep(for: .milliseconds(700))
+                    }
+
+                    Pasteboard.put(text: target.prompt)
+                    guard Pasteboard.synthesizePaste() else {
+                        staged.keepPayload()
+                        finish(.clipboardOnly(reason: "paste didn't go through"))
+                        return
+                    }
+
+                    // Step 6, the line that is never crossed: no Return. The user reads
+                    // what is about to be sent and sends it themselves.
+                    staged.restoreAfterPaste()
+                    finish(.pasted(hadImage: pastedImage))
                 }
-                staged.restoreAfterPaste()
-                finish(.pasted(hadImage: image != nil))
             }
         }
     }

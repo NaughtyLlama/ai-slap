@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// Stages the handoff payload, then puts the user's clipboard back.
 ///
@@ -7,22 +8,18 @@ import AppKit
 /// watches what they do.
 enum Pasteboard {
 
-    /// How long to wait after a successful paste before putting the old clipboard
-    /// back. Long enough for the destination to have read it.
+    /// How long to wait after the last paste before putting the old clipboard back.
     static let restoreDelay: TimeInterval = 1.0
 
-    /// A staged payload, and the means to undo it.
+    /// The user's clipboard, held so it can be given back.
     ///
     /// The restore is deliberately **not** on a timer from staging. It used to be, and
-    /// that raced the paste: a destination that took longer than the timer to come
-    /// forward — a cold app launch, every time — had the payload pulled out from under
-    /// it, so the paste landed on nothing *and* the clipboard fallback was gone too.
-    /// The user saw an app switch and no other evidence the feature existed.
-    /// The restore now happens only when a paste has actually landed.
+    /// that raced the paste: whenever the destination took longer than the timer to be
+    /// ready, the payload was pulled out from under it, so the paste landed on nothing
+    /// *and* the clipboard fallback was gone too.
     struct Staged {
         fileprivate let saved: Snapshot
 
-        /// Puts the user's clipboard back, after a beat.
         func restoreAfterPaste() {
             DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
                 restore(saved, to: .general)
@@ -34,24 +31,29 @@ enum Pasteboard {
         func keepPayload() {}
     }
 
-    /// Puts text (and optionally an image) on the pasteboard.
-    @discardableResult
-    static func stage(text: String, image: CGImage?) -> Staged {
+    static func beginStaging() -> Staged {
+        Staged(saved: snapshot(.general))
+    }
+
+    /// Text and image go on the pasteboard **separately, and are pasted separately**.
+    ///
+    /// Writing both as one pasteboard write produces two items, and chat composers
+    /// read only the first — which is why the prompt arrived and the screenshot
+    /// silently didn't. Two writes and two Cmd-Vs put both in the composer.
+    static func put(text: String) {
         let pasteboard = NSPasteboard.general
-        let saved = snapshot(pasteboard)
-
         pasteboard.clearContents()
-        var items: [NSPasteboardWriting] = [text as NSString]
-        if let image {
-            let bitmap = NSBitmapImageRep(cgImage: image)
-            bitmap.size = NSSize(width: image.width, height: image.height)
-            let nsImage = NSImage(size: bitmap.size)
-            nsImage.addRepresentation(bitmap)
-            items.append(nsImage)
-        }
-        pasteboard.writeObjects(items)
+        pasteboard.setString(text, forType: .string)
+    }
 
-        return Staged(saved: saved)
+    static func put(image: CGImage) {
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        bitmap.size = NSSize(width: image.width, height: image.height)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
     }
 
     fileprivate struct Snapshot {
@@ -83,22 +85,50 @@ enum Pasteboard {
 
     /// Synthesises Cmd-V. Works because Accessibility is already granted — the same
     /// permission the whole product depends on.
+    @discardableResult
     static func synthesizePaste() -> Bool {
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            return false
-        }
-        let vKeyCode: CGKeyCode = 0x09  // kVK_ANSI_V
+        Keyboard.press(keyCode: CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
+    }
+}
 
-        guard let down = CGEvent(
-                keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
+enum Keyboard {
+    @discardableResult
+    static func press(keyCode: CGKeyCode, flags: CGEventFlags) -> Bool {
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let down = CGEvent(
+                keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
               let up = CGEvent(
-                keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+                keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         else { return false }
 
-        down.flags = .maskCommand
-        up.flags = .maskCommand
+        down.flags = flags
+        up.flags = flags
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
         return true
+    }
+
+    /// Parses a rulebook shortcut like "cmd+n" or "cmd+shift+o".
+    static func parse(_ shortcut: String) -> (CGKeyCode, CGEventFlags)? {
+        let parts = shortcut.lowercased().split(separator: "+").map(String.init)
+        guard let keyName = parts.last else { return nil }
+
+        var flags: CGEventFlags = []
+        for modifier in parts.dropLast() {
+            switch modifier {
+            case "cmd", "command": flags.insert(.maskCommand)
+            case "shift":          flags.insert(.maskShift)
+            case "opt", "option":  flags.insert(.maskAlternate)
+            case "ctrl", "control": flags.insert(.maskControl)
+            default: return nil
+            }
+        }
+
+        let keyCodes: [String: Int] = [
+            "n": kVK_ANSI_N, "o": kVK_ANSI_O, "t": kVK_ANSI_T,
+            "k": kVK_ANSI_K, "j": kVK_ANSI_J, "return": kVK_Return,
+        ]
+        guard let code = keyCodes[keyName] else { return nil }
+        return (CGKeyCode(code), flags)
     }
 }

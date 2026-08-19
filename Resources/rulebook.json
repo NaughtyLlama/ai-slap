@@ -36,7 +36,7 @@
     "bundleIds": [
       "com.anthropic.claudefordesktop",
       "com.openai.chat",
-      "com.google.gemini",
+      "com.google.GeminiMacOS",
       "com.todesktop.230313mzl4w4u92",
       "com.exafunction.windsurf"
     ],
@@ -61,13 +61,17 @@
       "id": "claude",
       "name": "Claude",
       "bundleId": "com.anthropic.claudefordesktop",
-      "webURL": "https://claude.ai/new"
+      "webURL": "https://claude.ai/new",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
     },
     {
       "id": "chatgpt",
       "name": "ChatGPT",
       "bundleId": "com.openai.chat",
-      "webURL": "https://chatgpt.com"
+      "webURL": "https://chatgpt.com",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
     }
   ],
 

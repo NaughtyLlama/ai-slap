@@ -14,6 +14,12 @@ struct AIDestination: Decodable {
     /// prefill is text-only anyway. The pasteboard carries both text and image, so the
     /// flow does not depend on a URL contract that might silently rot.
     let webURL: String?
+    /// Keystroke that starts a fresh conversation, sent once the destination is
+    /// frontmost. Lives here rather than in code because it is exactly the kind of
+    /// per-vendor detail docs/05 wants updatable without an app release.
+    let newChatShortcut: String?
+    /// Terminals and editors can't take a pasted image; they need a file path instead.
+    let acceptsPastedImage: Bool
 
     var isNativeAvailable: Bool {
         guard let bundleId else { return false }
