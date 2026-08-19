@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AISlap",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],  // SCScreenshotManager (handoff capture) is 14+
     targets: [
         .executableTarget(
             name: "AISlap",

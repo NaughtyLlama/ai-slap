@@ -22,6 +22,7 @@ final class MenuBarController {
     private let onSetSensitivity: (InterruptionEngine.Sensitivity) -> Void
     private let onShowLearned: () -> Void
     private let onTestNudge: () -> Void
+    private let onHandoffNow: () -> Void
     private let onFixPermission: () -> Void
     private let onExport: () -> Void
     private let onRevealData: () -> Void
@@ -33,6 +34,7 @@ final class MenuBarController {
         onSetSensitivity: @escaping (InterruptionEngine.Sensitivity) -> Void,
         onShowLearned: @escaping () -> Void,
         onTestNudge: @escaping () -> Void,
+        onHandoffNow: @escaping () -> Void,
         onFixPermission: @escaping () -> Void,
         onExport: @escaping () -> Void,
         onRevealData: @escaping () -> Void,
@@ -43,6 +45,7 @@ final class MenuBarController {
         self.onSetSensitivity = onSetSensitivity
         self.onShowLearned = onShowLearned
         self.onTestNudge = onTestNudge
+        self.onHandoffNow = onHandoffNow
         self.onFixPermission = onFixPermission
         self.onExport = onExport
         self.onRevealData = onRevealData
@@ -126,6 +129,18 @@ final class MenuBarController {
         )
         test.target = self
         menu.addItem(test)
+
+        menu.addItem(.separator())
+
+        // The hotkey is the real entry point; this exists so the feature is
+        // discoverable and so the shortcut is written down somewhere.
+        let handoff = NSMenuItem(
+            title: "Hand this window to Claude", action: #selector(handoffNow),
+            keyEquivalent: " "
+        )
+        handoff.keyEquivalentModifierMask = [.option]
+        handoff.target = self
+        menu.addItem(handoff)
 
         menu.addItem(.separator())
 
@@ -231,6 +246,7 @@ final class MenuBarController {
     @objc private func toggleNudges() { onToggleNudges() }
     @objc private func showLearned() { onShowLearned() }
     @objc private func testNudge() { onTestNudge() }
+    @objc private func handoffNow() { onHandoffNow() }
     @objc private func fixPermission() { onFixPermission() }
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }

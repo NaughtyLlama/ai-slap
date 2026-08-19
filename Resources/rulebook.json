@@ -56,6 +56,21 @@
     ]
   },
 
+  "destinations": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "bundleId": "com.anthropic.claudefordesktop",
+      "webURL": "https://claude.ai/new"
+    },
+    {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "bundleId": "com.openai.chat",
+      "webURL": "https://chatgpt.com"
+    }
+  ],
+
   "browserBundleIds": [
     "com.google.Chrome",
     "com.apple.Safari",

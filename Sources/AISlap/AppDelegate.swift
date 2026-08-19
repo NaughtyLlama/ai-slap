@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private var isPaused = false
     private var menuRefreshTimer: Timer?
     private var notificationsAllowed = false
+    private let hotkey = GlobalHotkey()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onSetSensitivity: { [weak self] in self?.setSensitivity($0) },
             onShowLearned: { [weak self] in self?.showLearned() },
             onTestNudge: { [weak self] in self?.engine?.sendTestNudge() },
+            onHandoffNow: { [weak self] in self?.handoffNow() },
             onFixPermission: { [weak self] in self?.openAccessibilitySettings() },
             onExport: { [weak self] in self?.export() },
             onRevealData: { [weak self] in self?.revealData() },
@@ -55,6 +57,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
         observer.onChange = { [weak self] context in
             self?.contextChanged(to: context)
+        }
+
+        engine?.onHandoffResult = { [weak self] result in
+            self?.report(result)
+        }
+
+        // docs/05 entry point 1. Entry point 2 is the notification's "Hand it over";
+        // the goose-drag is Phase 1.
+        if !hotkey.register(onPress: { [weak self] in self?.handoffNow() }) {
+            NSLog("AISlap: could not register Option-Space — something else owns it.")
         }
 
         UNUserNotificationCenter.current().delegate = self
@@ -203,6 +215,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    private func handoffNow() {
+        engine?.handoffFrontmostWindow(title: currentContext?.title)
+    }
+
+    /// The clipboard is the universal fallback (docs/05), but only if the user knows
+    /// it's there. Silence after a failed paste looks identical to a broken app.
+    private func report(_ result: Handoff.Result) {
+        switch result {
+        case .pasted:
+            break  // They can see it. Saying so as well would be noise.
+        case .clipboardOnly(let reason):
+            notify(
+                title: "It's on your clipboard — press \u{2318}V",
+                body: "Couldn't paste for you: \(reason)."
+            )
+        case .failed(let message):
+            notify(title: "Handoff didn't work", body: message)
+        }
+    }
+
+    private func notify(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "handoff.\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+        )
     }
 
     private func export() {

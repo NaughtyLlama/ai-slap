@@ -63,6 +63,13 @@ final class InterruptionEngine {
     private var pendingTimer: Timer?
     private var pendingEventIDs: [String: Int64] = [:]
 
+    /// The window each pending nudge was about. Captured when the nudge fires, not
+    /// when it is accepted: by accept time the frontmost app may well be something
+    /// else, and handing over the wrong window is worse than handing over nothing.
+    private var pendingTargets: [Int64: Handoff.Target] = [:]
+
+    let handoff: Handoff
+
     /// Contexts already interrupted about, so the same email can't be nagged twice
     /// without an intervening AI use (docs/03). In memory only — it holds titles, and
     /// titles never reach disk outside the Phase 0 log.
@@ -75,6 +82,7 @@ final class InterruptionEngine {
         self.rules = rulebook.rules.map {
             CompiledRule(rule: $0, browserBundleIds: rulebook.browserBundleIds)
         }
+        self.handoff = Handoff(destinations: rulebook.destinations)
         self.aiBundleIDs = Set(rulebook.aiContexts.bundleIds)
         self.aiBrowserTitlePatterns = rulebook.aiContexts.browserTitlePatterns
             .compactMap(CompiledRule.compile)
@@ -293,6 +301,12 @@ final class InterruptionEngine {
             ruleID: rule.id, category: rule.category
         ) else { return }
 
+        if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            pendingTargets[eventID] = Handoff.Target(
+                pid: pid, title: context.title, prompt: rule.nudge.promptTemplate
+            )
+        }
+
         let identifier = "nudge.\(eventID)"
         pendingEventIDs[identifier] = eventID
 
@@ -355,8 +369,10 @@ final class InterruptionEngine {
     static let actionMute = "AISLAP_MUTE"
 
     static func registerNotificationCategory() {
+        // No .foreground: activating AI-slap here would steal focus a moment before
+        // the handoff opens the destination, and the paste would land in the wrong app.
         let accept = UNNotificationAction(
-            identifier: actionAccept, title: "Hand it over", options: [.foreground]
+            identifier: actionAccept, title: "Hand it over", options: []
         )
         // docs/02: this is the only coverage for AI used on a phone or another
         // machine, and a high rate here is a detection bug, not user error.
@@ -383,7 +399,7 @@ final class InterruptionEngine {
         switch actionIdentifier {
         case Self.actionAccept, UNNotificationDefaultActionIdentifier:
             store.updateOutcome(eventID: eventID, to: .accepted)
-            openAIDestination()
+            runHandoff(for: eventID)
         case Self.actionAlreadyDid:
             store.updateOutcome(eventID: eventID, to: .alreadyDid)
             lastAIContextAt = Date()
@@ -396,20 +412,29 @@ final class InterruptionEngine {
         }
     }
 
-    /// ⚠️ Not the real handoff. docs/05 specifies capture-the-window, build the
-    /// prompt, let the user read it, never auto-submit — none of which exists yet.
-    /// This just brings the AI app forward so "accepted" means something today.
-    private func openAIDestination() {
-        let candidates = ["com.anthropic.claudefordesktop", "com.openai.chat"]
-        for bundleID in candidates {
-            if let url = NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: bundleID
-            ) {
-                NSWorkspace.shared.openApplication(
-                    at: url, configuration: NSWorkspace.OpenConfiguration()
-                )
-                return
-            }
+    /// Reports how a handoff went, so the UI can say "on your clipboard, press Cmd-V"
+    /// instead of leaving the user staring at an empty composer.
+    var onHandoffResult: ((Handoff.Result) -> Void)?
+
+    private func runHandoff(for eventID: Int64) {
+        guard let target = pendingTargets.removeValue(forKey: eventID) else { return }
+        handoff.run(target) { [weak self] result in
+            self?.onHandoffResult?(result)
+        }
+    }
+
+    /// The hotkey path: no rule, no interruption, just whatever is in front right now.
+    /// docs/05 calls this the "set a timer, screenshot it, drop it into Claude" quote
+    /// made instant, and it is the entry point that works even when every rule is quiet.
+    func handoffFrontmostWindow(title: String?) {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let target = Handoff.Target(
+            pid: app.processIdentifier,
+            title: title,
+            prompt: "Here's what I'm working on — can you help me with this?"
+        )
+        handoff.run(target) { [weak self] result in
+            self?.onHandoffResult?(result)
         }
     }
 

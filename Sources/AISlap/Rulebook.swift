@@ -11,6 +11,7 @@ struct Rulebook: Decodable {
     let version: String
     let aiContexts: AIContexts
     let browserBundleIds: [String]
+    let destinations: [AIDestination]
     let rules: [Rule]
 
     struct AIContexts: Decodable {
