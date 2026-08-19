@@ -176,6 +176,72 @@ Distribution is blocked on an Apple Developer ID. Until then builds are ad-hoc s
 macOS may drop the Accessibility grant on rebuild, since TCC keys the permission to the
 code signature.
 
+## Where we left off — 2026-08-19
+
+Everything below is committed and pushed. The app is built, signed and running on
+Chen's machine.
+
+**Working end to end:** detection, the rules engine, on-device personalisation, the
+handoff (⌥Space, or "Hand it over" on a nudge), and the panel. ~950 sessions logged,
+~92% carrying a window title. Four nudges have fired; one was accepted and completed a
+real handoff.
+
+**Chen's settings, and why** — he is a heavy AI user and deliberately non-default:
+
+| Setting | Value | Reason |
+|---|---|---|
+| Pause after AI use | **off** | He starts work with AI then switches windows while it runs. That switch is the moment worth catching; the amnesty hid exactly it. |
+| How pushy | pushy | Wants volume while testing. |
+| Max per day | 15 | 4 was too quiet for someone asking to be nudged. |
+| Show nudges as | panel | Notifications auto-dismissed before he could read four buttons. |
+
+**First thing to check next session.** If the menu-bar icon is a red triangle, or logged
+`window_title` values are NULL, Accessibility was dropped — re-add the app in Privacy &
+Security. That should now be rare: signing uses a stable identity, and the keychain
+partition list is set so `codesign` runs unattended. Verify a build actually signed
+rather than trusting a pipeline exit code; a failed signing once slipped through `tail`
+and shipped an ad-hoc binary that silently lost the permission.
+
+**Ask Chen how it has felt in use.** The metric that matters is acceptance, not volume.
+`rule_events` holds the truth, and "What it's learned about you…" in the menu prints the
+learned state.
+
+### Open, in the order they matter
+
+1. **Is there a product here for a heavy AI user?** See the note above the Personaliser
+   section. Most of Chen's observed time already *is* AI, and his manual moments are
+   short interleaved gaps rather than long sits. Turning the amnesty off made the app
+   speak; whether what it says is *useful* is the real test, and it is unresolved.
+2. **The mascot.** Chen is building the character himself rather than commissioning art,
+   which removes the animator cost line in `docs/08` and the commission timing in the
+   Phase 1 plan. `NudgePanel` is its window already — behaviour, placement and buttons
+   are done, so the character drops in without touching the rest. The escalation ladder
+   in `docs/04` (tiers 0–2 first) is not built.
+3. **Camera and microphone suppression.** The other half of the `docs/04` detection, and
+   the reason the panel must not be trusted around screen shares yet: frontmost-app
+   detection catches Zoom, not a browser tab sharing a screen. Deliberately deferred
+   because touching `AVCaptureDevice` can raise its own permission prompt. Until then,
+   ⌥⌘G before any demo.
+4. **`timer.checkin`** is written and disabled in the rulebook. `docs/03` calls it the
+   fallback that keeps the product useful while confidence rules are tuned — which is
+   exactly the current situation. Cheap to try.
+5. **Apple Developer ID.** Still the blocker on anyone but Chen running this. The local
+   self-signed identity solves the dev loop only.
+
+### Things that cost time before, so don't rediscover them
+
+- Swift's synthesised `Decodable` throws on a missing key rather than using a property
+  default. Any optional rulebook field needs explicit `decodeIfPresent`.
+- Matching AI names against non-browser window titles silences the whole product: an
+  Obsidian vault called "Claude Working Folder" read as continuous AI use.
+- `NSPasteboard` written once with text and image makes two items, and composers read
+  only the first. Paste them separately.
+- A non-activating panel never becomes key, so AppKit will not draw a default button in
+  the accent colour, and `behindWindow` blending samples the desktop — both produced
+  invisible UI in light mode only.
+- OpenSSL 3 writes a PKCS#12 macOS refuses to import; `-legacy` and a non-empty
+  passphrase are both required.
+
 ## Conventions
 
 - Specs live in `docs/`, numbered. Keep them updated as decisions change — a stale spec
