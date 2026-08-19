@@ -23,21 +23,33 @@ struct AIDestination: Decodable {
 
     var isAvailable: Bool { isNativeAvailable || webURL != nil }
 
-    /// Opens the destination and reports the bundle ID to wait for before pasting.
-    @discardableResult
-    func open() -> String? {
+    struct Opened {
+        let bundleID: String
+        /// Whether the app was already running. A cold launch needs far longer to
+        /// reach a state where a keystroke means anything, and guessing one timeout
+        /// for both cases is how the paste got dropped.
+        let wasAlreadyRunning: Bool
+    }
+
+    /// Opens the destination and reports what to wait for before pasting.
+    func open() -> Opened? {
         if let bundleId,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
         {
+            let wasRunning = !NSRunningApplication
+                .runningApplications(withBundleIdentifier: bundleId).isEmpty
+
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-            return bundleId
+            return Opened(bundleID: bundleId, wasAlreadyRunning: wasRunning)
         }
 
         // docs/05: destination app not installed → fall back to the web adapter.
         guard let webURL, let url = URL(string: webURL) else { return nil }
+        let browserBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         NSWorkspace.shared.open(url)
-        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        guard let browserBefore else { return nil }
+        return Opened(bundleID: browserBefore, wasAlreadyRunning: true)
     }
 }

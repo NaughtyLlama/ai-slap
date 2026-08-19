@@ -7,12 +7,36 @@ import AppKit
 /// watches what they do.
 enum Pasteboard {
 
-    /// How long to leave the payload in place before restoring. Long enough for the
-    /// paste to land, short enough that the user's own clipboard is barely gone.
-    static let restoreDelay: TimeInterval = 2.5
+    /// How long to wait after a successful paste before putting the old clipboard
+    /// back. Long enough for the destination to have read it.
+    static let restoreDelay: TimeInterval = 1.0
 
-    /// Puts text (and optionally an image) on the pasteboard and schedules the restore.
-    static func stage(text: String, image: CGImage?) {
+    /// A staged payload, and the means to undo it.
+    ///
+    /// The restore is deliberately **not** on a timer from staging. It used to be, and
+    /// that raced the paste: a destination that took longer than the timer to come
+    /// forward — a cold app launch, every time — had the payload pulled out from under
+    /// it, so the paste landed on nothing *and* the clipboard fallback was gone too.
+    /// The user saw an app switch and no other evidence the feature existed.
+    /// The restore now happens only when a paste has actually landed.
+    struct Staged {
+        fileprivate let saved: Snapshot
+
+        /// Puts the user's clipboard back, after a beat.
+        func restoreAfterPaste() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
+                restore(saved, to: .general)
+            }
+        }
+
+        /// Leaves the payload in place. Used on every failure path: docs/05 makes the
+        /// clipboard the universal fallback, which only works if it is still there.
+        func keepPayload() {}
+    }
+
+    /// Puts text (and optionally an image) on the pasteboard.
+    @discardableResult
+    static func stage(text: String, image: CGImage?) -> Staged {
         let pasteboard = NSPasteboard.general
         let saved = snapshot(pasteboard)
 
@@ -27,12 +51,10 @@ enum Pasteboard {
         }
         pasteboard.writeObjects(items)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            restore(saved, to: pasteboard)
-        }
+        return Staged(saved: saved)
     }
 
-    private struct Snapshot {
+    fileprivate struct Snapshot {
         let items: [[NSPasteboard.PasteboardType: Data]]
     }
 

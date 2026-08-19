@@ -3,9 +3,9 @@ import AppKit
 /// The six steps of docs/05, in order: capture the window, build the prompt, stage the
 /// pasteboard, open the destination, wait for it, paste — and never submit.
 ///
-/// The clipboard is the universal fallback. Every failure path below still leaves the
-/// payload one Cmd-V away, so the user is never stranded with a broken interaction and
-/// no recourse.
+/// The clipboard is the universal fallback. Every failure path below leaves the payload
+/// on it and says so, so the user is never stranded with a broken interaction and no
+/// recourse.
 final class Handoff {
 
     struct Target {
@@ -17,15 +17,45 @@ final class Handoff {
     enum Result {
         case pasted(hadImage: Bool)
         case clipboardOnly(reason: String)
+        case needsScreenRecording
         case failed(String)
+
+        var summary: String {
+            switch self {
+            case .pasted(let hadImage):
+                return hadImage ? "pasted with screenshot" : "pasted, text only"
+            case .clipboardOnly(let reason):
+                return "clipboard only — \(reason)"
+            case .needsScreenRecording:
+                return "waiting on Screen Recording permission"
+            case .failed(let message):
+                return "failed — \(message)"
+            }
+        }
     }
 
-    /// How long to wait for the destination to come forward before giving up and
-    /// leaving the payload on the clipboard.
-    private let activationTimeout: TimeInterval = 2.0
+    /// How long to wait for the destination to come forward. A cold launch is a
+    /// different order of magnitude from activating an app that is already running,
+    /// and docs/05's single "~2s" is only right for the warm case — the cold one was
+    /// timing out every time and dropping the paste.
+    private let warmTimeout: TimeInterval = 3
+    private let coldTimeout: TimeInterval = 20
+
+    /// A beat after the app is frontmost, so the composer has focus before the
+    /// keystroke lands. A cold-started app needs noticeably longer to settle.
+    private let warmSettle: TimeInterval = 0.35
+    private let coldSettle: TimeInterval = 1.5
 
     private let destinations: [AIDestination]
-    private var hasExplainedScreenRecording = false
+    private var isRunning = false
+
+    /// Set once we've asked for Screen Recording, so the ask happens exactly once.
+    private var hasRequestedScreenRecording: Bool {
+        get { UserDefaults.standard.bool(forKey: "hasRequestedScreenRecording") }
+        set { UserDefaults.standard.set(newValue, forKey: "hasRequestedScreenRecording") }
+    }
+
+    private(set) var lastResult: Result?
 
     init(destinations: [AIDestination]) {
         self.destinations = destinations
@@ -36,70 +66,89 @@ final class Handoff {
     }
 
     func run(_ target: Target, completion: @escaping (Result) -> Void) {
+        func finish(_ result: Result) {
+            lastResult = result
+            isRunning = false
+            NSLog("AISlap: handoff — \(result.summary)")
+            completion(result)
+        }
+
+        guard !isRunning else { return }
+        isRunning = true
+
         guard let destination = preferredDestination else {
-            completion(.failed("No AI destination is configured."))
+            finish(.failed("No AI destination is configured."))
             return
         }
 
-        // Step 2. Screen Recording is requested here and nowhere else — docs/02 keeps
-        // it out of onboarding on purpose. A denial costs the screenshot, not the flow.
-        let wantsImage = WindowCapture.hasPermission
-            || !hasExplainedScreenRecording
+        // Step 2, and the permission it needs. docs/02 defers Screen Recording out of
+        // onboarding to here, the first handoff, where the ask explains itself.
+        //
+        // Asking is a blocking, focus-stealing system prompt, so it happens *before*
+        // anything is staged and this run then stops. Running the rest of the flow
+        // around a modal meant the destination never became frontmost and the paste
+        // went nowhere. macOS also requires a relaunch before the grant takes effect.
+        if !WindowCapture.hasPermission && !hasRequestedScreenRecording {
+            hasRequestedScreenRecording = true
+            _ = WindowCapture.requestPermission()
+            finish(.needsScreenRecording)
+            return
+        }
 
         Task { @MainActor in
-            var image: CGImage?
-            if wantsImage {
-                if WindowCapture.hasPermission {
-                    image = await WindowCapture.capture(
-                        pid: target.pid, title: target.title
-                    )
-                } else {
-                    hasExplainedScreenRecording = true
-                    if case .granted = WindowCapture.requestPermission() {
-                        image = await WindowCapture.capture(
-                            pid: target.pid, title: target.title
-                        )
-                    }
-                }
-            }
+            let image = WindowCapture.hasPermission
+                ? await WindowCapture.capture(pid: target.pid, title: target.title)
+                : nil
 
-            // Steps 3 and 4. The prompt is the rule's template verbatim: docs/05 forbids
-            // interpolating anything from the screen, and the window title in particular
-            // has already been reduced to a category token and discarded.
-            Pasteboard.stage(text: target.prompt, image: image)
+            // Steps 3 and 4. The prompt is the rule's template verbatim: docs/05
+            // forbids interpolating anything from the screen, and the window title in
+            // particular is already reduced to a category token and discarded.
+            let staged = Pasteboard.stage(text: target.prompt, image: image)
 
             // Step 5.
-            guard let expectedBundleID = destination.open() else {
-                completion(.clipboardOnly(reason: "couldn't open \(destination.name)"))
+            guard let opened = destination.open() else {
+                staged.keepPayload()
+                finish(.clipboardOnly(reason: "couldn't open \(destination.name)"))
                 return
             }
 
-            self.whenFrontmost(expectedBundleID) { arrived in
+            let timeout = opened.wasAlreadyRunning ? self.warmTimeout : self.coldTimeout
+            let settle = opened.wasAlreadyRunning ? self.warmSettle : self.coldSettle
+
+            self.whenFrontmost(opened.bundleID, timeout: timeout, settle: settle) {
+                arrived in
                 guard arrived else {
-                    completion(.clipboardOnly(
-                        reason: "\(destination.name) didn't come forward"
+                    staged.keepPayload()
+                    finish(.clipboardOnly(
+                        reason: "\(destination.name) didn't come forward in time"
                     ))
                     return
                 }
                 // Step 6. Paste only. Never Return — the user reads what is about to be
                 // sent and sends it themselves. Non-negotiable in docs/05.
-                let pasted = Pasteboard.synthesizePaste()
-                completion(pasted
-                    ? .pasted(hadImage: image != nil)
-                    : .clipboardOnly(reason: "paste didn't go through"))
+                guard Pasteboard.synthesizePaste() else {
+                    staged.keepPayload()
+                    finish(.clipboardOnly(reason: "paste didn't go through"))
+                    return
+                }
+                staged.restoreAfterPaste()
+                finish(.pasted(hadImage: image != nil))
             }
         }
     }
 
     private func whenFrontmost(
-        _ bundleID: String, completion: @escaping (Bool) -> Void
+        _ bundleID: String,
+        timeout: TimeInterval,
+        settle: TimeInterval,
+        completion: @escaping (Bool) -> Void
     ) {
-        let deadline = Date().addingTimeInterval(activationTimeout)
+        let deadline = Date().addingTimeInterval(timeout)
 
         func poll() {
-            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID {
-                // A beat for the composer to take focus before the keystroke lands.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            if frontmost?.bundleIdentifier == bundleID, frontmost?.isFinishedLaunching == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + settle) {
                     completion(true)
                 }
                 return
@@ -108,7 +157,7 @@ final class Handoff {
                 completion(false)
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: poll)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
         }
         poll()
     }

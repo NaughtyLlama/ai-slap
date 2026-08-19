@@ -13,6 +13,7 @@ final class MenuBarController {
     private let statusItemLine = NSMenuItem()
     private let statsItem = NSMenuItem()
     private let nudgeStatsItem = NSMenuItem()
+    private let handoffStatusItem = NSMenuItem()
     private let nudgeToggleItem = NSMenuItem()
     private let pauseItem = NSMenuItem()
     private var sensitivityItems: [InterruptionEngine.Sensitivity: NSMenuItem] = [:]
@@ -134,13 +135,16 @@ final class MenuBarController {
 
         // The hotkey is the real entry point; this exists so the feature is
         // discoverable and so the shortcut is written down somewhere.
+        // The shortcut is owned by the Carbon hotkey, which works globally. Setting it
+        // as a menu key equivalent as well would give the combination two owners.
         let handoff = NSMenuItem(
-            title: "Hand this window to Claude", action: #selector(handoffNow),
-            keyEquivalent: " "
+            title: "Hand this window to Claude  (\u{2325}Space)",
+            action: #selector(handoffNow), keyEquivalent: ""
         )
-        handoff.keyEquivalentModifierMask = [.option]
         handoff.target = self
         menu.addItem(handoff)
+        handoffStatusItem.isEnabled = false
+        menu.addItem(handoffStatusItem)
 
         menu.addItem(.separator())
 
@@ -184,7 +188,10 @@ final class MenuBarController {
         nudgesEnabled: Bool,
         sensitivity: InterruptionEngine.Sensitivity,
         hasAccessibility: Bool,
-        notificationsAllowed: Bool
+        notificationsAllowed: Bool,
+        hotkeyRegistered: Bool,
+        hotkeyPresses: Int,
+        lastHandoff: String?
     ) {
         applyIcon(
             hasAccessibility: hasAccessibility,
@@ -203,6 +210,17 @@ final class MenuBarController {
         notificationItem.isHidden = notificationsAllowed && hasAccessibility
 
         statusItemLine.title = isPaused ? "Paused" : statusLine
+
+        // "Did the shortcut even fire?" has to be answerable without reading a log.
+        if !hotkeyRegistered {
+            handoffStatusItem.title = "⚠️ ⌥Space is taken by another app"
+        } else if let lastHandoff {
+            handoffStatusItem.title = "Last handoff: \(lastHandoff)"
+        } else {
+            handoffStatusItem.title = hotkeyPresses == 0
+                ? "Shortcut ready — not used yet"
+                : "Shortcut pressed \(hotkeyPresses)× — no handoff completed"
+        }
 
         if isPaused {
             contextItem.title = "Paused — nothing is being logged"

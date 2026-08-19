@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private var menuRefreshTimer: Timer?
     private var notificationsAllowed = false
     private let hotkey = GlobalHotkey()
+    private var hotkeyRegistered = false
+    private var hotkeyPresses = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -65,7 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
         // docs/05 entry point 1. Entry point 2 is the notification's "Hand it over";
         // the goose-drag is Phase 1.
-        if !hotkey.register(onPress: { [weak self] in self?.handoffNow() }) {
+        hotkeyRegistered = hotkey.register(onPress: { [weak self] in
+            self?.hotkeyPresses += 1
+            self?.handoffNow()
+            self?.refreshMenu()
+        })
+        if !hotkeyRegistered {
             NSLog("AISlap: could not register Option-Space — something else owns it.")
         }
 
@@ -232,6 +239,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
                 title: "It's on your clipboard — press \u{2318}V",
                 body: "Couldn't paste for you: \(reason)."
             )
+        case .needsScreenRecording:
+            // macOS needs a relaunch before the grant takes effect, so say that
+            // plainly rather than letting the next attempt fail mysteriously.
+            notify(
+                title: "Allow Screen Recording to send the window",
+                body: "Turn on AI-slap in Privacy & Security \u{203A} Screen Recording, "
+                    + "then quit and reopen AI-slap. Handoff works without it, "
+                    + "text only."
+            )
         case .failed(let message):
             notify(title: "Handoff didn't work", body: message)
         }
@@ -317,7 +333,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             nudgesEnabled: engine?.isEnabled ?? false,
             sensitivity: engine?.sensitivity ?? .balanced,
             hasAccessibility: AXIsProcessTrusted(),
-            notificationsAllowed: notificationsAllowed
+            notificationsAllowed: notificationsAllowed,
+            hotkeyRegistered: hotkeyRegistered,
+            hotkeyPresses: hotkeyPresses,
+            lastHandoff: engine?.handoff.lastResult?.summary
         )
     }
 
