@@ -47,6 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onTestNudge: { [weak self] in self?.testNudge() },
             onSetStyle: { [weak self] in self?.setStyle($0) },
             onTogglePanic: { [weak self] in self?.togglePanic() },
+            onToggleRule: { [weak self] id, muted in
+                self?.engine?.setUserMuted(id, muted: muted)
+                self?.refreshMenu()
+            },
+            ruleStates: { [weak self] in self?.engine?.ruleStates() ?? [] },
             onHandoffNow: { [weak self] in self?.handoffNow() },
             onFixPermission: { [weak self] in self?.openAccessibilitySettings() },
             onExport: { [weak self] in self?.export() },
@@ -92,12 +97,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         }
 
         engine?.onPresentPanel = { [weak self] copy, prompt, eventID, ruleID in
-            self?.presentPanel(copy: copy, prompt: prompt, eventID: eventID)
+            self?.presentPanel(
+                copy: copy, prompt: prompt, eventID: eventID, ruleID: ruleID
+            )
         }
 
         UNUserNotificationCenter.current().delegate = self
         InterruptionEngine.registerNotificationCategory()
         requestNotificationPermission()
+
+        // An unanswered nudge is a soft no. Left as "fired" it inflates the acceptance
+        // denominator and never reaches the backoff.
+        engine?.resolveStaleEvents()
 
         requestAccessibilityIfNeeded()
         observer.start()
@@ -256,7 +267,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     /// The panel is presented here rather than in the engine: the engine decides
     /// whether to interrupt, the app layer owns what that looks like. Swapping the
     /// panel for the mascot later touches only this file and NudgePanel.
-    private func presentPanel(copy: String, prompt: String, eventID: Int64) {
+    private func presentPanel(
+        copy: String, prompt: String, eventID: Int64, ruleID: String
+    ) {
         nudgePanel.show(copy: copy, prompt: prompt) { [weak self] response in
             let outcome: SessionStore.Outcome
             switch response {
@@ -267,7 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             // backoff, or a rule nobody engages with never learns that.
             case .dismiss, .ignored: outcome = .dismissed
             }
-            self?.engine?.recordPanelOutcome(outcome, eventID: eventID)
+            self?.engine?.recordPanelOutcome(
+                outcome, eventID: eventID, ruleID: ruleID
+            )
             self?.refreshMenu()
         }
     }

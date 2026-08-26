@@ -49,10 +49,14 @@ struct Rulebook: Decodable {
             var titlePatterns: [String] = []
             var excludeTitlePatterns: [String] = []
             var matchesAnything = false
+            /// Matches any context **no other rule claims**. The point is to need no
+            /// site list at all: whatever a given person grinds away in, recognised or
+            /// not, this sees it.
+            var unrecognised = false
 
             private enum CodingKeys: String, CodingKey {
                 case useBrowserBundles, extraBundleIds, titlePatterns
-                case excludeTitlePatterns, matchesAnything
+                case excludeTitlePatterns, matchesAnything, unrecognised
             }
 
             init(from decoder: Decoder) throws {
@@ -67,6 +71,8 @@ struct Rulebook: Decodable {
                     [String].self, forKey: .excludeTitlePatterns) ?? []
                 matchesAnything = try container.decodeIfPresent(
                     Bool.self, forKey: .matchesAnything) ?? false
+                unrecognised = try container.decodeIfPresent(
+                    Bool.self, forKey: .unrecognised) ?? false
             }
         }
 
@@ -75,6 +81,10 @@ struct Rulebook: Decodable {
             let noAiContextForMs: Double
             var repeatCount: Int?
             var repeatWithinMs: Double?
+            /// Total time in one surface across the whole day, rather than one
+            /// unbroken sit. Dwell finds lingering; this finds accumulation, and they
+            /// are different kinds of work.
+            var accumulatedTodayMs: Double?
         }
 
         struct Nudge: Decodable {
@@ -148,6 +158,9 @@ struct CompiledRule {
 
     func matches(_ context: WindowContext) -> Bool {
         guard rule.enabled else { return false }
+        // Handled by the engine after every other rule has had its say — it is defined
+        // by what the others *don't* claim, which this method cannot know.
+        if rule.match.unrecognised { return false }
         if rule.match.matchesAnything { return true }
 
         if !bundleIDs.isEmpty && !bundleIDs.contains(context.bundleID) {

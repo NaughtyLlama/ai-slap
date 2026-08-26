@@ -8,14 +8,23 @@ extension SessionStore {
 
     // MARK: - Dwell history
 
+    /// A glance is not work. Contexts shorter than this are a window stealing focus —
+    /// a chat notification, a tab reloading — and there are hundreds of them.
+    ///
+    /// They were being fed into the dwell percentiles, which meant the "learned"
+    /// threshold was computed partly from interruptions rather than from working. One
+    /// notification tab alone contributed 249 sessions averaging 3.6 seconds.
+    static let glanceThreshold: TimeInterval = 5
+
     /// Dwell times previously observed in a category, newest first, for learning what
-    /// counts as a long sit *for this person*.
+    /// counts as a long sit *for this person*. Glances are excluded — see above.
     func dwellSamples(category: String, sinceDays: Int = 30, limit: Int = 400) -> [Double] {
         let cutoff = Date().addingTimeInterval(-Double(sinceDays) * 86400)
             .timeIntervalSince1970
         let sql = """
             SELECT dwell_seconds FROM sessions
             WHERE category = ? AND started_at >= ?
+              AND dwell_seconds >= \(Self.glanceThreshold)
             ORDER BY started_at DESC LIMIT ?;
             """
         var statement: OpaquePointer?
@@ -207,6 +216,48 @@ extension SessionStore {
             }
         }
         return tally
+    }
+
+    /// An interruption nobody answered is a soft no, not an absence of one. Left as
+    /// "fired" it silently inflates the acceptance denominator — the north-star metric
+    /// — and never reaches the backoff. Resolved on launch for anything old enough
+    /// that a reply is not coming.
+    @discardableResult
+    func resolveStaleEvents(olderThan interval: TimeInterval = 3600) -> Int {
+        let cutoff = Date().addingTimeInterval(-interval).timeIntervalSince1970
+        let sql = "UPDATE rule_events SET outcome = 'dismissed' WHERE outcome = 'fired' AND at < ?;"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, cutoff)
+        guard sqlite3_step(statement) == SQLITE_DONE else { return 0 }
+        return Int(sqlite3_changes(db))
+    }
+
+    /// Seconds spent today in one unrecognised browser surface, keyed on the leading
+    /// segment of the window title — "Termly - Part of group…" and "Termly - Google
+    /// Chrome" are the same surface. Feeds the accumulation rule.
+    func accumulatedSecondsToday(surface: String) -> TimeInterval {
+        let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        let sql = """
+            SELECT SUM(dwell_seconds) FROM sessions
+            WHERE category IS NULL AND started_at >= ?
+              AND window_title IS NOT NULL
+              AND (window_title = ? OR window_title LIKE ? || ' - %');
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, startOfDay)
+        sqlite3_bind_text(statement, 2, surface, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 3, surface, -1, sqliteTransient)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              sqlite3_column_type(statement, 0) != SQLITE_NULL
+        else { return 0 }
+        return sqlite3_column_double(statement, 0)
     }
 
     func firedToday() -> Int {

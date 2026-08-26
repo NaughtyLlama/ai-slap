@@ -285,6 +285,39 @@
     },
 
     {
+      "id": "surface.grind",
+      "enabled": true,
+      "category": "grind",
+      "_comment": [
+        "The accumulation rule. Every other rule asks 'have you been sitting here a",
+        "long time?'; this asks 'how much of today has this eaten in total?'",
+        "",
+        "It came out of eleven days of real logs. The dwell rules were firing on the",
+        "surfaces where the user reads, and missing entirely the ones where the user",
+        "grinds — a consent-banner tool visited thirty times, a tag manager visited",
+        "eighty-three, none of it a long sit, all of it exactly the fiddly work AI is",
+        "good at. Lingering and accumulating are different signals and the product had",
+        "only ever measured the first.",
+        "",
+        "Deliberately has no site list: it matches whatever no other rule claims, so it",
+        "generalises to whichever tools a given person actually grinds in rather than",
+        "the ones we thought to enumerate."
+      ],
+      "match": { "unrecognised": true, "useBrowserBundles": true },
+      "condition": {
+        "dwellMs": 30000,
+        "noAiContextForMs": 600000,
+        "accumulatedTodayMs": 900000
+      },
+      "confidence": 0.55,
+      "cooldownMs": 10800000,
+      "nudge": {
+        "copy": "This one's eaten a chunk of your day.",
+        "promptTemplate": "I keep doing repetitive setup work in a web tool. Help me speed this up or automate it."
+      }
+    },
+
+    {
       "id": "timer.checkin",
       "enabled": false,
       "category": "any",

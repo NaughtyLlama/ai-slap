@@ -218,11 +218,25 @@ final class InterruptionEngine {
         pendingTimer = nil
     }
 
-    /// Highest-confidence rule claiming this context.
+    /// Highest-confidence rule claiming this context — or, if none do, the
+    /// accumulation rule, which is defined precisely by what the others ignore.
     private func bestRule(for context: WindowContext) -> CompiledRule? {
-        rules
-            .filter { $0.matches(context) }
-            .max { $0.rule.confidence < $1.rule.confidence }
+        if let claimed = rules
+            .filter({ $0.matches(context) })
+            .max(by: { $0.rule.confidence < $1.rule.confidence })
+        {
+            return claimed
+        }
+        return unrecognisedRule(for: context)
+    }
+
+    private func unrecognisedRule(for context: WindowContext) -> CompiledRule? {
+        guard context.surfaceKey != nil else { return nil }
+        return rules.first {
+            $0.rule.enabled
+                && $0.rule.match.unrecognised
+                && ($0.bundleIDs.isEmpty || $0.bundleIDs.contains(context.bundleID))
+        }
     }
 
     // MARK: - The gates
@@ -305,6 +319,21 @@ final class InterruptionEngine {
         let signature = "\(rule.id)|\(context.title ?? context.bundleID)"
         if interruptedSignatures.contains(signature) {
             return .blocked("already nudged about this one")
+        }
+
+        if let required = rule.condition.accumulatedTodayMs {
+            guard let surface = context.surfaceKey else {
+                return .blocked("no surface to total up")
+            }
+            let accumulated = store.accumulatedSecondsToday(surface: surface)
+            guard accumulated >= required / 1000 else {
+                return .blocked(String(
+                    format: "%@ has taken %dm today, needs %dm",
+                    surface,
+                    Int(accumulated / 60),
+                    Int(required / 60000)
+                ))
+            }
         }
 
         if let needed = rule.condition.repeatCount,
@@ -391,7 +420,15 @@ final class InterruptionEngine {
         }
 
         if style == .panel, let onPresentPanel {
-            onPresentPanel(rule.nudge.copy, rule.nudge.promptTemplate, eventID, rule.id)
+            var copy = rule.nudge.copy
+            if rule.condition.accumulatedTodayMs != nil, let surface = context.surfaceKey {
+                let minutes = Int(store.accumulatedSecondsToday(surface: surface) / 60)
+                // Naming the surface here is safe: the panel is local and the string
+                // never leaves the device. docs/05 forbids putting it in the *prompt*,
+                // which does get transmitted, and that stays generic.
+                copy = "\(surface) has eaten \(minutes) minutes today."
+            }
+            onPresentPanel(copy, rule.nudge.promptTemplate, eventID, rule.id)
             onFire?()
             return
         }
@@ -487,8 +524,13 @@ final class InterruptionEngine {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
-    func recordPanelOutcome(_ outcome: SessionStore.Outcome, eventID: Int64) {
+    func recordPanelOutcome(
+        _ outcome: SessionStore.Outcome, eventID: Int64, ruleID: String? = nil
+    ) {
         store.updateOutcome(eventID: eventID, to: outcome)
+        if outcome == .muted, let ruleID {
+            personalizer.setUserMuted(ruleID, muted: true)
+        }
         if outcome == .accepted { runHandoff(for: eventID) }
         if outcome == .alreadyDid { lastAIContextAt = Date() }
     }
@@ -503,6 +545,7 @@ final class InterruptionEngine {
             lastAIContextAt = Date()
         case Self.actionMute:
             store.updateOutcome(eventID: eventID, to: .muted)
+            personalizer.setUserMuted(ruleID, muted: true)
         case UNNotificationDismissActionIdentifier, Self.actionDismiss:
             store.updateOutcome(eventID: eventID, to: .dismissed)
         default:
@@ -538,5 +581,35 @@ final class InterruptionEngine {
 
     func explanation() -> String {
         personalizer.explanation(for: rules)
+    }
+
+    struct RuleState {
+        let id: String
+        let userMuted: Bool
+        let restingReason: String?
+    }
+
+    /// Every rule and whether it can currently fire, for the menu. A rule resting on a
+    /// backoff is shown as resting, not as off: the distinction matters, because one
+    /// comes back on its own and the other never does.
+    func ruleStates() -> [RuleState] {
+        let userMuted = personalizer.userMutedRules()
+        return rules.filter { $0.rule.enabled }.map { compiled in
+            let id = compiled.rule.id
+            let muted = userMuted.contains(id)
+            let resting = muted ? nil : personalizer.isMuted(id).reason
+            return RuleState(id: id, userMuted: muted, restingReason: resting)
+        }
+    }
+
+    func setUserMuted(_ ruleID: String, muted: Bool) {
+        personalizer.setUserMuted(ruleID, muted: muted)
+    }
+
+    func resolveStaleEvents() {
+        let resolved = store.resolveStaleEvents()
+        if resolved > 0 {
+            NSLog("AISlap: resolved \(resolved) unanswered nudge(s) as dismissed")
+        }
     }
 }

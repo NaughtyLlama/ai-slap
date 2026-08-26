@@ -21,6 +21,7 @@ final class MenuBarController {
     private var budgetItems: [Int: NSMenuItem] = [:]
     private var styleItems: [InterruptionEngine.Style: NSMenuItem] = [:]
     private let panicItem = NSMenuItem()
+    private let rulesItem = NSMenuItem()
 
     private let onTogglePause: () -> Void
     private let onToggleNudges: () -> Void
@@ -31,6 +32,8 @@ final class MenuBarController {
     private let onTestNudge: () -> Void
     private let onSetStyle: (InterruptionEngine.Style) -> Void
     private let onTogglePanic: () -> Void
+    private let onToggleRule: (String, Bool) -> Void
+    private let ruleStates: () -> [InterruptionEngine.RuleState]
     private let onHandoffNow: () -> Void
     private let onFixPermission: () -> Void
     private let onExport: () -> Void
@@ -47,6 +50,8 @@ final class MenuBarController {
         onTestNudge: @escaping () -> Void,
         onSetStyle: @escaping (InterruptionEngine.Style) -> Void,
         onTogglePanic: @escaping () -> Void,
+        onToggleRule: @escaping (String, Bool) -> Void,
+        ruleStates: @escaping () -> [InterruptionEngine.RuleState],
         onHandoffNow: @escaping () -> Void,
         onFixPermission: @escaping () -> Void,
         onExport: @escaping () -> Void,
@@ -62,6 +67,8 @@ final class MenuBarController {
         self.onTestNudge = onTestNudge
         self.onSetStyle = onSetStyle
         self.onTogglePanic = onTogglePanic
+        self.onToggleRule = onToggleRule
+        self.ruleStates = ruleStates
         self.onHandoffNow = onHandoffNow
         self.onFixPermission = onFixPermission
         self.onExport = onExport
@@ -179,6 +186,12 @@ final class MenuBarController {
         budgetRoot.submenu = budgetMenu
         menu.addItem(budgetRoot)
 
+        // The user-facing half of "nothing turns itself off for good": every rule,
+        // its current state, and a click to retire or restore it.
+        rulesItem.title = "Rules"
+        rulesItem.submenu = NSMenu()
+        menu.addItem(rulesItem)
+
         let learned = NSMenuItem(
             title: "What it's learned about you…",
             action: #selector(showLearned), keyEquivalent: ""
@@ -280,6 +293,7 @@ final class MenuBarController {
         notificationItem.isHidden = notificationsAllowed && hasAccessibility
 
         statusItemLine.title = isPaused ? "Paused" : statusLine
+        rebuildRulesMenu()
 
         // "Did the shortcut even fire?" has to be answerable without reading a log.
         if !hotkeyRegistered {
@@ -351,6 +365,32 @@ final class MenuBarController {
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }
+
+    private func rebuildRulesMenu() {
+        let submenu = NSMenu()
+        for state in ruleStates() {
+            let item = NSMenuItem(
+                title: state.id, action: #selector(toggleRule(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = state.id
+            item.state = state.userMuted ? .off : .on
+            // A rule resting on a backoff is not off — it comes back by itself. Saying
+            // so stops a temporary silence reading as a permanent one.
+            if let resting = state.restingReason {
+                item.title = "\(state.id) — resting: \(resting)"
+            } else if state.userMuted {
+                item.title = "\(state.id) — off (click to restore)"
+            }
+            submenu.addItem(item)
+        }
+        rulesItem.submenu = submenu
+    }
+
+    @objc private func toggleRule(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onToggleRule(id, sender.state == .on)
+    }
 
     @objc private func togglePanic() { onTogglePanic() }
 

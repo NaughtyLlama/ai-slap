@@ -74,6 +74,12 @@ final class Personalizer {
         let seconds: TimeInterval
         let isLearned: Bool
         let sampleCount: Int
+        /// True when the personal figure came out under the absolute floor and the
+        /// floor is what is actually being used. Reporting this as "learned" was a
+        /// small lie the menu used to tell.
+        var isFloored = false
+        /// The personal figure before flooring, for the fit check below.
+        var personalSeconds: TimeInterval = 0
     }
 
     /// How long you have to sit in this context before it counts as parked.
@@ -92,8 +98,30 @@ final class Personalizer {
         let floored = max(bounded, absoluteFloor)
 
         return LearnedThreshold(
-            seconds: floored, isLearned: true, sampleCount: samples.count
+            seconds: floored,
+            isLearned: true,
+            sampleCount: samples.count,
+            isFloored: bounded < absoluteFloor,
+            personalSeconds: personal
         )
+    }
+
+    /// Whether a rule's premise describes this person at all.
+    ///
+    /// A rule saying "ninety seconds on one email" assumes lingering. If someone's own
+    /// p85 is ten seconds, they never linger there — and no threshold fixes that,
+    /// because there is nothing to find. The old behaviour silently used the floor and
+    /// nagged them anyway, which is exactly how a rule ends up 0-for-5.
+    ///
+    /// This only ever *suggests*. Nothing is switched off without the user saying so.
+    func fitsPoorly(_ rule: Rulebook.Rule) -> (poor: Bool, reason: String?) {
+        let threshold = dwellThreshold(for: rule)
+        guard threshold.isLearned, threshold.isFloored else { return (false, nil) }
+        guard threshold.personalSeconds < absoluteFloor / 2 else { return (false, nil) }
+
+        let seconds = Int(threshold.personalSeconds.rounded())
+        return (true, "you rarely spend more than \(seconds)s here, so this rule's "
+                    + "premise doesn't really describe how you work")
     }
 
     // MARK: - 2. Per-rule trust
@@ -110,27 +138,86 @@ final class Personalizer {
         return clamp(posterior / priorMean, 0.4, 1.6)
     }
 
-    /// docs/03: a rule whose acceptance sits below ~15% over a meaningful sample gets
-    /// pulled. Remotely, that's an operational decision for everyone; here it's an
-    /// automatic one for this person.
+    /// How long a rule goes quiet after being turned down, by how many times running.
+    ///
+    /// The previous version was a flat 24 hours with no escalation, so a rule rejected
+    /// five times out of five came back every single day — the nag-fatigue spiral
+    /// docs/03 names as the most likely way this product dies.
+    ///
+    /// **Nothing here is permanent.** Even the longest backoff expires and the rule
+    /// gets another chance, because what someone works on changes and a rule that was
+    /// useless in August may fit in October. Only the user retires a rule for good, by
+    /// asking for it — and that is reversible from the menu.
+    private func backoffDuration(consecutiveDismissals streak: Int) -> TimeInterval? {
+        switch streak {
+        case 0..<3: return nil
+        case 3..<5: return 86400          // a day
+        case 5..<8: return 7 * 86400      // a week
+        default:    return 14 * 86400     // a fortnight, then try again
+        }
+    }
+
+    /// Rules the user explicitly retired with "Stop suggesting this". The only mute
+    /// that does not expire — and it is listed in the menu, never silent.
+    func userMutedRules() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: "userMutedRules") ?? [])
+    }
+
+    func setUserMuted(_ ruleID: String, muted: Bool) {
+        var rules = userMutedRules()
+        if muted { rules.insert(ruleID) } else { rules.remove(ruleID) }
+        UserDefaults.standard.set(Array(rules), forKey: "userMutedRules")
+    }
+
     func isMuted(_ ruleID: String) -> (muted: Bool, reason: String?) {
-        let recent = store.recentOutcomes(ruleID: ruleID, limit: 3)
-        if recent.count == 3 && recent.allSatisfy({ $0 == .dismissed }) {
-            if let last = store.lastFired(ruleID: ruleID),
-               Date().timeIntervalSince(last) < 86400 {
-                return (true, "dismissed three times in a row — quiet for 24h")
+        if userMutedRules().contains(ruleID) {
+            return (true, "you turned this one off")
+        }
+
+        let streak = consecutiveDismissals(ruleID)
+        if let duration = backoffDuration(consecutiveDismissals: streak),
+           let last = store.lastFired(ruleID: ruleID)
+        {
+            let elapsed = Date().timeIntervalSince(last)
+            if elapsed < duration {
+                return (true,
+                        "turned down \(streak)x running — back in \(humanised(duration - elapsed))")
             }
         }
 
+        // docs/03 pulls a rule below ~15% acceptance. Remotely that is an operational
+        // decision for the whole population; here it is a local one for this person —
+        // and unlike the remote pull, it lapses instead of sticking.
         let tally = store.tally(ruleID: ruleID)
         if tally.resolved >= 12 {
             let rate = Double(tally.wins) / Double(tally.resolved)
-            if rate < 0.15 {
-                return (true, String(format: "only %.0f%% useful over %d — muted",
-                                     rate * 100, tally.resolved))
+            if rate < 0.15, let last = store.lastFired(ruleID: ruleID) {
+                let elapsed = Date().timeIntervalSince(last)
+                if elapsed < 14 * 86400 {
+                    let pct = Int((rate * 100).rounded())
+                    return (true,
+                            "\(pct)% useful over \(tally.resolved) — resting for \(humanised(14 * 86400 - elapsed))")
+                }
             }
         }
         return (false, nil)
+    }
+
+    /// Dismissals in a row, most recent first, stopping at the first non-dismissal.
+    private func consecutiveDismissals(_ ruleID: String) -> Int {
+        var streak = 0
+        for outcome in store.recentOutcomes(ruleID: ruleID, limit: 12) {
+            guard outcome == .dismissed else { break }
+            streak += 1
+        }
+        return streak
+    }
+
+    private func humanised(_ interval: TimeInterval) -> String {
+        let days = Int((interval / 86400).rounded(.up))
+        if days <= 1 { return "a day" }
+        if days <= 7 { return "\(days) days" }
+        return "\(days / 7) weeks"
     }
 
     // MARK: - 3. Time of day
@@ -176,12 +263,23 @@ final class Personalizer {
 
             var line = "• \(rule.id): fires after "
             line += format(threshold.seconds)
-            if threshold.isLearned {
+            if threshold.isFloored {
+                // Say what is actually happening. Claiming this was "learned from 173
+                // sessions" when the learned figure was discarded for the floor is a
+                // small lie, and it hid the far more useful fact below.
+                line += " (the minimum — your own figure is "
+                line += "\(format(threshold.personalSeconds)), below it)"
+            } else if threshold.isLearned {
                 line += " (learned from \(threshold.sampleCount) of your sessions; "
                 line += "default \(format(rule.condition.dwellMs / 1000)))"
             } else {
                 line += " (default — needs \(minimumDwellSamples - threshold.sampleCount) "
                 line += "more sessions to adapt)"
+            }
+            let fit = fitsPoorly(rule)
+            if fit.poor, let reason = fit.reason {
+                line += "\n   POOR FIT: \(reason)."
+                line += " Turn it off from “Rules” if you agree."
             }
             if tally.resolved > 0 {
                 line += "\n   \(tally.wins)/\(tally.resolved) useful"

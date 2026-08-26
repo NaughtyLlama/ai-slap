@@ -8,6 +8,16 @@ struct WindowContext: Equatable {
     let title: String?
 
     var displayTitle: String { title ?? "—" }
+
+    /// The leading segment of the title, which is what identifies a *surface*:
+    /// "Termly - Part of group…" and "Termly - Google Chrome" are the same tool.
+    /// Used by the accumulation rule to total a day's time in one place.
+    var surfaceKey: String? {
+        guard let title else { return nil }
+        let head = title.components(separatedBy: " - ").first ?? title
+        let trimmed = head.trimmingCharacters(in: .whitespaces)
+        return trimmed.count >= 3 ? trimmed : nil
+    }
 }
 
 /// A context that has ended, ready to be written to the log.
