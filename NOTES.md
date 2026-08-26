@@ -119,3 +119,80 @@ Each of these produced a bug that looked like something else entirely.
   passphrase are both required.
 
 
+
+## What eleven days of real use taught us — 2026-08-25
+
+One user, ~3,000 sessions, 17 nudges. Everything below is n=1 and should be read that
+way: the formal `docs/08` gate was skipped, so nothing here separates "true of the
+product" from "true of this person". That distinction is the whole reason to get more
+users on it.
+
+### Acceptance was 27%, and the average hid everything
+
+Four useful out of fifteen resolved — just above the ≥25% target in `docs/03`. But per
+rule: `chat.thread` 2/5, `doc` 1/4, `search.repeated` 1/1, `email.message` **0/5**.
+
+Strip the one bad rule and it's 4/10. One rule was generating a third of all
+interruptions and had never once been right. **Report per-rule acceptance, never the
+average** — the average is what lets a broken rule hide inside a healthy product.
+
+### The backoff had no teeth
+
+`email.message` was dismissed three times running, went quiet for 24 hours as designed,
+then came back and was dismissed again. And again. Five for five over six days.
+
+The escalation everyone assumes is there was not: a flat 24 hours, forever, and a hard
+mute that needed 12 resolved outcomes — a bar a low-volume rule never reaches. So the
+single mechanism protecting against the product's most likely cause of death did almost
+nothing. Fixed to 3 → a day, 5 → a week, 8 → a fortnight.
+
+**Owner's constraint, and it is a good one:** no rule ever retires itself permanently.
+What someone works on changes, and a rule that was useless in August may fit in October.
+Permanence is the user's decision alone, and reversible.
+
+### We were teaching it with noise, and it changed the conclusions
+
+A notification tab — "Google Drive messaged you" — accounted for 249 sessions averaging
+3.6 seconds. Hundreds of sub-5-second focus-steals were being fed into the dwell
+percentiles the Personaliser learns from.
+
+Excluding them moved this user's p85 for email from **10s to 46s**, and for docs from
+72s to 98s.
+
+That matters beyond the numbers, because the 10s figure had been used to conclude that
+this user "never lingers on email, so no threshold can work" — a confident, structural,
+product-level claim. It was substantially an artifact of our own measurement. The rule
+had been firing at the 20-second floor because the contaminated data made the learned
+figure look smaller than the floor.
+
+**The lesson is not "filter noise".** It is that an analysis of user behaviour is only as
+good as the instrument, and a plausible story explained the corrupted numbers perfectly
+well. Check the instrument before concluding something about the person.
+
+### Dwell finds lingering; a lot of real work accumulates instead
+
+Of ~24 hours of non-idle time: 11.3 in AI, 9.5 in surfaces no rule watched at all, and
+4.1 across every matched category combined. The unwatched time was consent-banner config
+(30 visits), a tag manager (83 visits), analytics dashboards — fiddly repetitive work,
+none of it a long sit, all of it the kind of thing AI is good at.
+
+Every rule asked "have you been here a while?" Nothing asked "how much of today has this
+eaten?" Hence `surface.grind`, which carries no site list so it generalises to whatever a
+given person grinds in.
+
+`task.recurring` from `docs/03` would *not* have caught it, incidentally — the
+cross-day repeats were dominated by notification tabs and New Tab. The work was bursty,
+not habitual.
+
+### Volume was never the constraint
+
+Budget was set to 15/day. Actual: 2.4/day. Per-rule cooldowns bind long before the daily
+budget does, so tuning the budget in either direction does nothing. If volume needs
+changing, cooldowns are the lever.
+
+### Still open
+
+The user is a heavy AI user, which may make them the wrong test case entirely — roughly
+half their observed time already *is* AI, and their manual moments are short interleaved
+gaps rather than long sits. Whether the nudges are *useful* to such a person remains the
+central unanswered question, and it cannot be answered with one log.
