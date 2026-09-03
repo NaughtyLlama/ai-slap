@@ -22,6 +22,7 @@ final class MenuBarController {
     private var styleItems: [InterruptionEngine.Style: NSMenuItem] = [:]
     private let panicItem = NSMenuItem()
     private let rulesItem = NSMenuItem()
+    private let launchItem = NSMenuItem()
 
     private let onTogglePause: () -> Void
     private let onToggleNudges: () -> Void
@@ -32,6 +33,7 @@ final class MenuBarController {
     private let onTestNudge: () -> Void
     private let onSetStyle: (InterruptionEngine.Style) -> Void
     private let onTogglePanic: () -> Void
+    private let onToggleLaunchAtLogin: () -> Void
     private let onToggleRule: (String, Bool) -> Void
     private let ruleStates: () -> [InterruptionEngine.RuleState]
     private let onHandoffNow: () -> Void
@@ -50,6 +52,7 @@ final class MenuBarController {
         onTestNudge: @escaping () -> Void,
         onSetStyle: @escaping (InterruptionEngine.Style) -> Void,
         onTogglePanic: @escaping () -> Void,
+        onToggleLaunchAtLogin: @escaping () -> Void,
         onToggleRule: @escaping (String, Bool) -> Void,
         ruleStates: @escaping () -> [InterruptionEngine.RuleState],
         onHandoffNow: @escaping () -> Void,
@@ -67,6 +70,7 @@ final class MenuBarController {
         self.onTestNudge = onTestNudge
         self.onSetStyle = onSetStyle
         self.onTogglePanic = onTogglePanic
+        self.onToggleLaunchAtLogin = onToggleLaunchAtLogin
         self.onToggleRule = onToggleRule
         self.ruleStates = ruleStates
         self.onHandoffNow = onHandoffNow
@@ -227,6 +231,10 @@ final class MenuBarController {
         panicItem.action = #selector(togglePanic)
         menu.addItem(panicItem)
 
+        launchItem.target = self
+        launchItem.action = #selector(toggleLaunchAtLogin)
+        menu.addItem(launchItem)
+
         pauseItem.target = self
         pauseItem.action = #selector(togglePause)
         menu.addItem(pauseItem)
@@ -269,6 +277,7 @@ final class MenuBarController {
         amnesty: InterruptionEngine.Amnesty,
         style: InterruptionEngine.Style,
         isPanicked: Bool,
+        launchAtLogin: LaunchAtLogin.State,
         budget: Int,
         hasAccessibility: Bool,
         notificationsAllowed: Bool,
@@ -332,6 +341,21 @@ final class MenuBarController {
         for (key, item) in styleItems {
             item.state = key == style ? .on : .off
         }
+        switch launchAtLogin {
+        case .enabled:
+            launchItem.title = "Open at login"
+            launchItem.state = .on
+        case .disabled:
+            launchItem.title = "Open at login"
+            launchItem.state = .off
+        case .deniedBySystemSettings:
+            launchItem.title = "Open at login — blocked in System Settings"
+            launchItem.state = .off
+        case .unavailable(let why):
+            launchItem.title = "Open at login unavailable (\(why))"
+            launchItem.state = .off
+        }
+
         panicItem.title = isPanicked
             ? "Hidden — click to resume"
             : "Hide for 30 minutes  (\u{2325}\u{2318}G)"
@@ -393,6 +417,7 @@ final class MenuBarController {
     }
 
     @objc private func togglePanic() { onTogglePanic() }
+    @objc private func toggleLaunchAtLogin() { onToggleLaunchAtLogin() }
 
     @objc private func setStyle(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,

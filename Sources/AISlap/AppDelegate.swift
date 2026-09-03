@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onTestNudge: { [weak self] in self?.testNudge() },
             onSetStyle: { [weak self] in self?.setStyle($0) },
             onTogglePanic: { [weak self] in self?.togglePanic() },
+            onToggleLaunchAtLogin: { [weak self] in self?.toggleLaunchAtLogin() },
             onToggleRule: { [weak self] id, muted in
                 self?.engine?.setUserMuted(id, muted: muted)
                 self?.refreshMenu()
@@ -306,6 +307,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         refreshMenu()
     }
 
+    private func toggleLaunchAtLogin() {
+        let turningOn = !LaunchAtLogin.state.isOn
+        if let failure = LaunchAtLogin.set(turningOn) {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't change the login setting"
+            alert.informativeText = failure
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        } else if turningOn, !LaunchAtLogin.isInStableLocation {
+            // Worth saying once, at the moment it matters: the login item records a
+            // path, and this one is inside a build directory.
+            let alert = NSAlert()
+            alert.messageText = "Set to open at login — but move the app first"
+            alert.informativeText =
+                "AI-slap is running from a build folder. If that folder is rebuilt or "
+                + "cleaned, the login item will point at nothing and it will silently "
+                + "stop starting.\n\nRun ./scripts/build-app.sh --install to put it in "
+                + "/Applications, which is stable."
+            alert.alertStyle = .warning
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+        refreshMenu()
+    }
+
     private func togglePanic() {
         guard let engine else { return }
         if engine.suppression.isPanicked {
@@ -438,6 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             amnesty: engine?.amnesty ?? .standard,
             style: engine?.style ?? .panel,
             isPanicked: engine?.suppression.isPanicked ?? false,
+            launchAtLogin: LaunchAtLogin.state,
             budget: engine?.dailyBudget ?? 4,
             hasAccessibility: AXIsProcessTrusted(),
             notificationsAllowed: notificationsAllowed,

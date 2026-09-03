@@ -3,8 +3,12 @@
 # Builds AISlap.app from the SwiftPM executable. Requires only the Xcode Command
 # Line Tools.
 #
-#   ./scripts/build-app.sh          release build, ad-hoc signed
-#   ./scripts/build-app.sh --run    build, then launch it
+#   ./scripts/build-app.sh            release build
+#   ./scripts/build-app.sh --run      build, then launch from build/
+#   ./scripts/build-app.sh --install  build, copy to /Applications, launch from there
+#
+# Use --install if you want it to open at login: the login item stores a path, and
+# build/ can be deleted by a clean build.
 #
 # Signing note: with no Developer ID, the app is signed ad-hoc ("-"). macOS keys the
 # Accessibility permission to the code signature, so an ad-hoc build may need the
@@ -52,6 +56,23 @@ codesign --force --options runtime --sign "${SIGN_IDENTITY}" "${APP}"
 codesign --verify --verbose=1 "${APP}"
 
 echo "==> Built ${APP}"
+
+# Login items are recorded by path, and build/ is disposable — a clean build would
+# leave the login item pointing at nothing, silently, which is the exact failure this
+# guards against. /Applications is stable.
+if [[ "${1:-}" == "--install" ]]; then
+    echo "==> Installing to /Applications"
+    pkill -x "${APP_NAME}" 2>/dev/null || true
+    rm -rf "/Applications/${APP_NAME}.app"
+    cp -R "${APP}" "/Applications/${APP_NAME}.app"
+    echo "==> Launching from /Applications"
+    open "/Applications/${APP_NAME}.app"
+    echo
+    echo "    Accessibility is keyed to the bundle path as well as the signature, so"
+    echo "    the copy in /Applications needs granting once. After that, rebuild with"
+    echo "    --install and the grant and the login item both stick."
+    exit 0
+fi
 
 if [[ "${1:-}" == "--run" ]]; then
     echo "==> Launching"
