@@ -20,6 +20,9 @@ final class MenuBarController {
     private var amnestyItems: [InterruptionEngine.Amnesty: NSMenuItem] = [:]
     private var budgetItems: [Int: NSMenuItem] = [:]
     private var styleItems: [InterruptionEngine.Style: NSMenuItem] = [:]
+    private let mascotToggleItem = NSMenuItem()
+    private let calmItem = NSMenuItem()
+    private var tierItems: [DougWindow.Tier: NSMenuItem] = [:]
     private let panicItem = NSMenuItem()
     private let rulesItem = NSMenuItem()
     private let launchItem = NSMenuItem()
@@ -32,6 +35,9 @@ final class MenuBarController {
     private let onShowLearned: () -> Void
     private let onTestNudge: () -> Void
     private let onSetStyle: (InterruptionEngine.Style) -> Void
+    private let onToggleMascot: () -> Void
+    private let onToggleCalmMode: () -> Void
+    private let onSetMaxTier: (DougWindow.Tier) -> Void
     private let onTogglePanic: () -> Void
     private let onToggleLaunchAtLogin: () -> Void
     private let onToggleRule: (String, Bool) -> Void
@@ -51,6 +57,9 @@ final class MenuBarController {
         onShowLearned: @escaping () -> Void,
         onTestNudge: @escaping () -> Void,
         onSetStyle: @escaping (InterruptionEngine.Style) -> Void,
+        onToggleMascot: @escaping () -> Void,
+        onToggleCalmMode: @escaping () -> Void,
+        onSetMaxTier: @escaping (DougWindow.Tier) -> Void,
         onTogglePanic: @escaping () -> Void,
         onToggleLaunchAtLogin: @escaping () -> Void,
         onToggleRule: @escaping (String, Bool) -> Void,
@@ -69,6 +78,9 @@ final class MenuBarController {
         self.onShowLearned = onShowLearned
         self.onTestNudge = onTestNudge
         self.onSetStyle = onSetStyle
+        self.onToggleMascot = onToggleMascot
+        self.onToggleCalmMode = onToggleCalmMode
+        self.onSetMaxTier = onSetMaxTier
         self.onTogglePanic = onTogglePanic
         self.onToggleLaunchAtLogin = onToggleLaunchAtLogin
         self.onToggleRule = onToggleRule
@@ -158,6 +170,42 @@ final class MenuBarController {
         let styleRoot = NSMenuItem(title: "Show nudges as", action: nil, keyEquivalent: "")
         styleRoot.submenu = styleMenu
         menu.addItem(styleRoot)
+
+        // Doug's own controls, kept together and one level down: they change how an
+        // interruption looks and moves, never whether it happens.
+        let dougMenu = NSMenu()
+
+        mascotToggleItem.target = self
+        mascotToggleItem.action = #selector(toggleMascot)
+        dougMenu.addItem(mascotToggleItem)
+
+        // docs/04: vestibular sensitivity is common and a wandering sprite is a genuine
+        // accessibility problem. The system's reduce-motion setting forces this on
+        // regardless of what is ticked here.
+        calmItem.target = self
+        calmItem.action = #selector(toggleCalmMode)
+        dougMenu.addItem(calmItem)
+
+        dougMenu.addItem(.separator())
+        let tierHeader = NSMenuItem(
+            title: "How far he'll go", action: nil, keyEquivalent: ""
+        )
+        tierHeader.isEnabled = false
+        dougMenu.addItem(tierHeader)
+
+        for tier in DougWindow.Tier.allCases where tier != .ambient {
+            let item = NSMenuItem(
+                title: tier.title, action: #selector(setMaxTier(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = tier.rawValue
+            dougMenu.addItem(item)
+            tierItems[tier] = item
+        }
+
+        let dougRoot = NSMenuItem(title: "Doug", action: nil, keyEquivalent: "")
+        dougRoot.submenu = dougMenu
+        menu.addItem(dougRoot)
 
         let amnestyMenu = NSMenu()
         for amnesty in InterruptionEngine.Amnesty.allCases {
@@ -276,6 +324,9 @@ final class MenuBarController {
         sensitivity: InterruptionEngine.Sensitivity,
         amnesty: InterruptionEngine.Amnesty,
         style: InterruptionEngine.Style,
+        mascotEnabled: Bool,
+        calmMode: Bool,
+        maxTier: DougWindow.Tier,
         isPanicked: Bool,
         launchAtLogin: LaunchAtLogin.State,
         budget: Int,
@@ -340,6 +391,21 @@ final class MenuBarController {
         }
         for (key, item) in styleItems {
             item.state = key == style ? .on : .off
+        }
+
+        mascotToggleItem.title = mascotEnabled ? "Doug: on" : "Doug: off"
+        mascotToggleItem.state = mascotEnabled ? .on : .off
+        // Saying which one is in charge stops "I turned calm mode off and he still
+        // won't move" reading as a bug.
+        let systemReduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        calmItem.title = systemReduced
+            ? "Calm mode — forced on by Reduce Motion"
+            : "Calm mode — he only appears to interrupt"
+        calmItem.state = (calmMode || systemReduced) ? .on : .off
+        calmItem.isEnabled = !systemReduced
+        for (key, item) in tierItems {
+            item.state = key == maxTier ? .on : .off
+            item.isEnabled = mascotEnabled
         }
         switch launchAtLogin {
         case .enabled:
@@ -417,6 +483,15 @@ final class MenuBarController {
     }
 
     @objc private func togglePanic() { onTogglePanic() }
+    @objc private func toggleMascot() { onToggleMascot() }
+    @objc private func toggleCalmMode() { onToggleCalmMode() }
+
+    @objc private func setMaxTier(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? Int,
+              let tier = DougWindow.Tier(rawValue: raw)
+        else { return }
+        onSetMaxTier(tier)
+    }
     @objc private func toggleLaunchAtLogin() { onToggleLaunchAtLogin() }
 
     @objc private func setStyle(_ sender: NSMenuItem) {

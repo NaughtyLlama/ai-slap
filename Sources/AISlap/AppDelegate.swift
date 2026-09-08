@@ -17,8 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private var notificationsAllowed = false
     private let hotkeys = GlobalHotkeys()
     private let nudgePanel = NudgePanel()
+    private let doug = DougWindow()
     private var hotkeyRegistered = false
     private var hotkeyPresses = 0
+    private var pendingPanel: (eventID: Int64, ruleID: String)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -46,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onShowLearned: { [weak self] in self?.showLearned() },
             onTestNudge: { [weak self] in self?.testNudge() },
             onSetStyle: { [weak self] in self?.setStyle($0) },
+            onToggleMascot: { [weak self] in self?.toggleMascot() },
+            onToggleCalmMode: { [weak self] in self?.toggleCalmMode() },
+            onSetMaxTier: { [weak self] in self?.setMaxTier($0) },
             onTogglePanic: { [weak self] in self?.togglePanic() },
             onToggleLaunchAtLogin: { [weak self] in self?.toggleLaunchAtLogin() },
             onToggleRule: { [weak self] id, muted in
@@ -103,6 +108,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             )
         }
 
+        // docs/04's one design rule: the mascot *is* the button. Clicking Doug or
+        // dragging him onto a window runs the same handoff the shortcut runs — a mascot
+        // that only nags gets muted.
+        doug.onHandoffGesture = { [weak self] in self?.handoffFromDoug() }
+        doug.calmMode = MascotSettings.calmMode
+        doug.setEnabled(MascotSettings.isEnabled)
+
+        // A bubble nobody answers is a soft no, and docs/04 escalates within the same
+        // context rather than firing a second nudge at it.
+        nudgePanel.onLinger = { [weak self] in self?.lingerEscalate() }
+
         UNUserNotificationCenter.current().delegate = self
         InterruptionEngine.registerNotificationCategory()
         requestNotificationPermission()
@@ -128,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
         currentContext = context
         currentStartedAt = now
+
+        // Switching apps drops him straight back to sleep. docs/04 is explicit that
+        // escalation happens only *within* one sustained context — carrying a tier
+        // across an app switch is how a mascot becomes a nag.
+        doug.reset()
 
         if !isPaused {
             engine?.contextBegan(context, at: now)
@@ -271,7 +292,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private func presentPanel(
         copy: String, prompt: String, eventID: Int64, ruleID: String
     ) {
-        nudgePanel.show(copy: copy, prompt: prompt) { [weak self] response in
+        // Tier 2: one clack of the claw, and the bubble comes up over his head.
+        doug.escalate(to: .clack)
+        pendingPanel = (eventID, ruleID)
+
+        nudgePanel.show(
+            copy: copy, prompt: prompt, anchor: doug.frameOnScreen
+        ) { [weak self] response in
+            self?.pendingPanel = nil
             let outcome: SessionStore.Outcome
             switch response {
             case .accept:     outcome = .accepted
@@ -281,11 +309,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             // backoff, or a rule nobody engages with never learns that.
             case .dismiss, .ignored: outcome = .dismissed
             }
+            if outcome == .accepted || outcome == .alreadyDid {
+                // The mood loop from docs/04, and the only time he is ever delighted.
+                self?.doug.celebrate()
+            } else {
+                self?.doug.reset()
+            }
             self?.engine?.recordPanelOutcome(
                 outcome, eventID: eventID, ruleID: ruleID
             )
             self?.refreshMenu()
         }
+    }
+
+    /// Tier 2 sat unanswered. He crosses the screen to the window it is about and takes
+    /// the note with him, rather than a second nudge arriving on top of the first.
+    private func lingerEscalate() {
+        doug.escalate(to: .scuttle)
+        // The scuttle takes about a second; the bubble follows once he has arrived, or
+        // it would point at where he used to be.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+            guard let self, self.nudgePanel.isShowing else { return }
+            self.nudgePanel.reanchor(to: self.doug.frameOnScreen)
+        }
+    }
+
+    /// A click or a drag on Doug. If a bubble is up this *is* the answer to it, so it
+    /// records an acceptance rather than leaving the nudge to time out as ignored —
+    /// otherwise the fastest path to the handoff would also be the one that teaches the
+    /// Personaliser the rule was unwanted.
+    private func handoffFromDoug() {
+        if let (eventID, ruleID) = pendingPanel {
+            pendingPanel = nil
+            nudgePanel.close()
+            engine?.recordPanelOutcome(.accepted, eventID: eventID, ruleID: ruleID)
+        } else {
+            handoffNow()
+        }
+        doug.celebrate()
+        refreshMenu()
     }
 
     /// Fires through the real presentation path, skipping every gate, and records
@@ -296,14 +358,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             engine.sendTestNudge()
             return
         }
+        doug.escalate(to: .clack)
         nudgePanel.show(
             copy: "Test nudge — this is what one looks like",
-            prompt: "Nothing was logged. Your real nudges use these same buttons."
-        ) { _ in }
+            prompt: "Nothing was logged. Your real nudges use these same buttons.",
+            anchor: doug.frameOnScreen
+        ) { [weak self] _ in self?.doug.reset() }
     }
 
     private func setStyle(_ style: InterruptionEngine.Style) {
         engine?.style = style
+        refreshMenu()
+    }
+
+    private func toggleMascot() {
+        MascotSettings.isEnabled.toggle()
+        doug.setEnabled(MascotSettings.isEnabled)
+        refreshMenu()
+    }
+
+    private func toggleCalmMode() {
+        MascotSettings.calmMode.toggle()
+        doug.calmMode = MascotSettings.calmMode
+        refreshMenu()
+    }
+
+    private func setMaxTier(_ tier: DougWindow.Tier) {
+        MascotSettings.maxTier = tier
+        // Lowering the cap has to take effect on whatever he is doing right now, not on
+        // the next nudge — someone reaching for this setting is reaching for it because
+        // of what is on their screen at that moment.
+        doug.reset()
         refreshMenu()
     }
 
@@ -336,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         guard let engine else { return }
         if engine.suppression.isPanicked {
             engine.suppression.cancelPanic()
+            doug.unhide()
             refreshMenu()
         } else {
             panicHide()
@@ -345,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private func panicHide() {
         guard let engine else { return }
         nudgePanel.close()
+        doug.hide()
         engine.suppression.panic()
         notify(
             title: "Hidden for 30 minutes",
@@ -449,6 +536,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             self?.notificationsAllowed = allowed
         }
 
+        syncDoug()
+
         menuBar.update(
             context: isPaused ? nil : currentContext,
             category: currentContext.flatMap { engine?.category(for: $0) },
@@ -463,6 +552,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             sensitivity: engine?.sensitivity ?? .balanced,
             amnesty: engine?.amnesty ?? .standard,
             style: engine?.style ?? .panel,
+            mascotEnabled: MascotSettings.isEnabled,
+            calmMode: MascotSettings.calmMode,
+            maxTier: MascotSettings.maxTier,
             isPanicked: engine?.suppression.isPanicked ?? false,
             launchAtLogin: LaunchAtLogin.state,
             budget: engine?.dailyBudget ?? 4,
@@ -472,6 +564,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             hotkeyPresses: hotkeyPresses,
             lastHandoff: engine?.handoff.lastResult?.summary
         )
+    }
+
+    /// Keeps Doug in step with suppression and with how close the current context is to
+    /// a nudge. Runs on the menu's own refresh rather than a timer of its own — a
+    /// resident mascot earning a second polling loop is exactly the battery complaint
+    /// docs/04 sets budgets to avoid.
+    private func syncDoug() {
+        guard MascotSettings.isEnabled else { return }
+
+        // Hiding when it wasn't needed costs nothing; failing to hide once costs the
+        // account. Every check here errs toward gone.
+        let suppressed = engine?.suppression.check().suppressed ?? false
+        if suppressed || isPaused || engine?.isEnabled == false {
+            doug.hide()
+            return
+        }
+        doug.unhide()
+
+        guard !nudgePanel.isShowing else { return }
+
+        // Tier 1 at the halfway mark: he stops and looks at the window before anything
+        // fires. It is the cheapest interruption in the product and should be nearly all
+        // of them — most contexts that earn a stare never earn a nudge.
+        if let progress = engine?.dwellProgress(
+            for: currentContext, since: currentStartedAt
+        ), progress >= 0.5 {
+            doug.escalate(to: .sideEye)
+        }
     }
 
     // MARK: - Errors

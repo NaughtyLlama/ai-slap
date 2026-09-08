@@ -16,6 +16,7 @@ the two in sync — if you change one, change the other.**
 | What is the product, and what was specced? | [`README.md`](README.md), then `docs/01`–`08` in order |
 | How detection works | `docs/02` — most load-bearing technical doc |
 | The mascot, escalation, suppression | `docs/04` |
+| What Doug looks like, and why | `Doug.dc.html` — open it in a browser |
 
 **This file is a router, not a log.** It should rarely change. Current state goes in
 `HANDOFF.md`, reasoning and post-mortems go in `NOTES.md`. Anything dated that lands here
@@ -35,7 +36,9 @@ Sources/AISlap/
   Rulebook.swift                       rule schema, loading, compiled matching
   Personalizer.swift                   per-user adaptation
   InterruptionEngine.swift             gating + delivery
-  NudgePanel.swift                     the interruption window (the mascot's home)
+  NudgePanel.swift                     the interruption window — Doug's speech bubble
+  DougSprite.swift                     the pixel grids, copied verbatim from Doug.dc.html
+  DougWindow.swift                     Doug on the desktop, the tier ladder, taste settings
   Suppression.swift                    when nothing may appear
   Handoff.swift                        capture → prompt → clipboard → paste
   WindowCapture.swift                  ScreenCaptureKit, one window only
@@ -47,6 +50,8 @@ Resources/rulebook.json                rules, AI contexts, destinations, suppres
 Resources/Info.plist                   LSUIElement, bundle ID, version
 scripts/build-app.sh                   source → AISlap.app, Command Line Tools only
 scripts/make-signing-identity.sh       run once; stops rebuilds revoking Accessibility
+scripts/design-preview.sh              renders Doug + the bubble offscreen, to PNGs
+Doug.dc.html                           the design canvas — the source for the sprite
 ```
 
 ```bash
@@ -66,6 +71,10 @@ Log lives at `~/Library/Application Support/AISlap/phase0.sqlite`. Never in the 
   never a title, URL, or pixel.
 - **Interruptions are a mascot, and the mascot is also the handoff button.** A mascot
   that only nags gets muted.
+- **The mascot is Doug — a hermit crab in a dead CRT, and the screen is his face.**
+  Original character by design, which also settles the Desktop Goose trade-dress problem
+  in `docs/04`. `Doug.dc.html` is the source of truth for how he looks; `DougSprite.swift`
+  copies its pixel grids verbatim rather than exporting images, so the two can't drift.
 - **Native Swift, distributed outside the Mac App Store.** The sandbox forbids the
   Accessibility API this depends on.
 - **SwiftPM, not an `.xcodeproj`.** Command Line Tools build, sign, notarise and staple

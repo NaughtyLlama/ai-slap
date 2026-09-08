@@ -367,6 +367,24 @@ final class InterruptionEngine {
         return nil
     }
 
+    /// How far this context has travelled toward a nudge, 0…1, or nil if nothing is
+    /// armed against it and nothing will fire.
+    ///
+    /// This exists for the mascot and for nothing else. docs/04 wants tier 1 — Doug
+    /// stopping and looking at your window — to be the overwhelming majority of
+    /// interruptions, which means it has to happen *before* the nudge rather than as
+    /// part of it. Reading the same gates the fire path reads keeps the stare honest:
+    /// he never looks up for something that is blocked and would never have arrived.
+    func dwellProgress(for context: WindowContext?, since start: Date?) -> Double? {
+        guard isEnabled, let context, let start, !isAIContext(context) else { return nil }
+        guard let candidate = bestRule(for: context) else { return nil }
+        guard case .pass = gate(candidate, context: context) else { return nil }
+
+        let threshold = personalizer.dwellThreshold(for: candidate.rule).seconds
+        guard threshold > 0 else { return 1 }
+        return min(Date().timeIntervalSince(start) / threshold, 1)
+    }
+
     /// One line explaining what the engine is doing about the current context.
     func statusLine(for context: WindowContext?, since start: Date?) -> String {
         guard isEnabled else { return "Nudges off" }

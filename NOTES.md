@@ -196,3 +196,101 @@ The user is a heavy AI user, which may make them the wrong test case entirely �
 half their observed time already *is* AI, and their manual moments are short interleaved
 gaps rather than long sits. Whether the nudges are *useful* to such a person remains the
 central unanswered question, and it cannot be answered with one log.
+
+## Doug: the design file is the source, and the code copies it
+
+The mascot arrived as a design canvas — `Doug.dc.html` — rather than as a sprite sheet: a
+hermit crab living in a dead CRT, with the screen in his shell as his face. That choice is
+worth writing down, because it decides the shape of the code.
+
+**One shell plus a set of tiny 14×7 faces is the entire character.** Mood is a face swap
+inside a fixed body, not a redraw, which is why six emotions cost six seven-line strings
+instead of six sprite sheets — and it is why the `docs/04` cost line for an animator no
+longer has to be paid before anything can ship.
+
+`DougSprite.swift` therefore holds the same pixel-grid strings the design file paints
+from, copied verbatim rather than exported to PNGs. Exporting is simpler code and it was
+the wrong trade: the moment either side is edited the app and the canvas disagree and
+neither is authoritative. As text, an edit in one is a copy-paste into the other, and the
+palette recolours the whole character from three constants.
+
+`scripts/design-preview.sh` renders the sprite and the bubble offscreen from the shipping
+source. Both are drawn rather than composed from system controls, so "does this still look
+like the design" is not a question that can be answered by reading the code, and the first
+build of the bubble got it wrong in a way review would not have caught — the four
+response buttons hugged their titles and came out four different widths, which reads as
+three afterthoughts beside a primary rather than as four equal answers.
+
+### The tier ladder is driven from outside the engine
+
+`docs/04` wants tier 1 — Doug stopping and turning to look at your window — to be the
+overwhelming majority of interruptions. That cannot come from the fire path, because by
+definition it has to happen *before* anything fires.
+
+So the engine gained exactly one read-only method, `dwellProgress(for:since:)`, and the
+ladder lives in `AppDelegate` alongside the menu refresh that was already running. Two
+consequences worth keeping:
+
+- **The stare reads the same gates the nudge does.** He never looks up for something that
+  is suppressed, muted, resting on a backoff, or over budget — the stare would be a
+  promise the engine has already decided not to keep.
+- **No second timer.** A resident mascot earning its own polling loop is precisely the
+  battery complaint `docs/04` sets budgets to avoid.
+
+Tier 0 is asleep rather than idling: no display link, no paused animation loop, no timer
+at all. A frame timer exists only while something is actually moving and is torn down when
+it stops. Tier 1 is one repaint followed by nothing, which is a pleasing property for the
+tier that is meant to be almost all of them.
+
+### Two things the ladder does not do yet
+
+- **A drag onto a window hands off the *frontmost* window, not the window under Doug.**
+  Reading the window beneath a point needs `CGWindowListCopyWindowInfo`, which needs
+  Screen Recording — the permission this app has refused since `docs/02`. In practice the
+  frontmost window is almost always the one being pointed at, but "almost always" is doing
+  real work in that sentence and it will be wrong on a multi-window desktop.
+- **The hit area is the sprite's bounding box, not its alpha.** `docs/04` suggests a
+  hit-test mask against the sprite's alpha; instead the window is sized exactly to the
+  sprite, so every pixel outside Doug belongs to the app underneath because there is no
+  window there. The gap is the transparent corners *inside* that box, which swallow a
+  click meant for whatever is behind them. At a 34×22 sprite this is a few dozen points.
+
+### Silkscreen is not bundled
+
+The design file pulls Silkscreen from Google Fonts. Shipping it means committing a binary
+asset and carrying its licence, so the buttons ask for `Silkscreen` by name and fall back
+to monospaced system text at small size with tracking. If the font is ever installed the
+app picks it up with no code change. The near miss is visible but it is a near miss.
+
+### The design file's palette is right for paper and wrong for a desktop
+
+Doug went on screen for the first time and half of him was missing. The canvas paints him
+on `#EFE8DC`, so his silhouette is near-black ink and reads beautifully. Against a dark
+desktop that silhouette *is* the background: the outline and all four legs disappeared and
+he read as a floating pink CRT with no body.
+
+The fix is `Doug.Palette.onDesktop` — the same three colours with the two flat ones
+exchanged, cream silhouette on a dark bezel. The bubble still uses `.standard`, because a
+bubble carries its own paper with it and a crab does not.
+
+It is deliberately **not** switched on the system appearance. Doug cannot see the wallpaper
+behind him without Screen Recording, which this app refuses, so following light mode moves
+the failure to a dark wallpaper in light mode rather than fixing it. One look, chosen for
+the ground he actually stands on.
+
+Worth generalising: **the design file is authoritative about the character and not about
+its context.** Everything in `Doug.dc.html` sits on a page. Nothing in the app does.
+
+### Coming down a tier is a walk, not a teleport
+
+The first build dropped Doug to tier 0 wherever the nudge had left him — halfway across
+the screen after a scuttle, or perched on a window frame after hard mode. Reading the
+code that looks like "the tier reset correctly". Watching it, he is abandoned mid-screen.
+
+`goHome()` walks him back on both axes, because tier 4 leaves him partway up a window and
+returning along x alone would strand him in mid-air. He wears `.content` on the way rather
+than `.sleep`, since a sleeping face on a moving crab reads as a bug.
+
+The trigger is a context change, which is the same signal that resets the ladder — so he
+heads home when you switch to *anything*, and the AI apps that prompted the request are
+covered by the rulebook's own list rather than by a special case for one of them.
