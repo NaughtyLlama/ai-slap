@@ -46,8 +46,25 @@ final class Handoff {
     private let warmSettle: TimeInterval = 0.35
     private let coldSettle: TimeInterval = 1.5
 
-    private let destinations: [AIDestination]
+    let destinations: [AIDestination]
     private var isRunning = false
+
+    /// Which destination the user picked, by rulebook id.
+    ///
+    /// The first build had no such thing: it took the first natively installed entry,
+    /// which made "hand off to Claude" a property of the list order rather than a choice.
+    /// That is fine right up until someone works in ChatGPT or Gemini, at which point
+    /// the product silently hands their window to an app they don't use.
+    static var preferredID: String? {
+        get { UserDefaults.standard.string(forKey: "destination") }
+        set { UserDefaults.standard.set(newValue, forKey: "destination") }
+    }
+
+    /// Set once the user has been asked, so first run asks and no later run nags.
+    static var hasChosenDestination: Bool {
+        get { UserDefaults.standard.bool(forKey: "hasChosenDestination") }
+        set { UserDefaults.standard.set(newValue, forKey: "hasChosenDestination") }
+    }
 
     /// Set once we've asked for Screen Recording, so the ask happens exactly once.
     private var hasRequestedScreenRecording: Bool {
@@ -61,9 +78,21 @@ final class Handoff {
         self.destinations = destinations
     }
 
+    /// The user's choice if it is usable, and otherwise the old behaviour — because a
+    /// chosen destination whose app has since been uninstalled should degrade to
+    /// *something working*, not to a failed handoff and a lost capture.
     var preferredDestination: AIDestination? {
-        destinations.first { $0.isNativeAvailable } ?? destinations.first { $0.isAvailable }
+        if let id = Self.preferredID,
+           let chosen = destinations.first(where: { $0.id == id }),
+           chosen.isAvailable
+        {
+            return chosen
+        }
+        return destinations.first { $0.isNativeAvailable } ?? destinations.first { $0.isAvailable }
     }
+
+    /// Everything the user could pick, installed or reachable on the web.
+    var availableDestinations: [AIDestination] { destinations.filter(\.isAvailable) }
 
     func run(_ target: Target, completion: @escaping (Result) -> Void) {
         func finish(_ result: Result) {
@@ -131,7 +160,11 @@ final class Handoff {
                     // A handoff belongs in a fresh conversation. Pasting into whatever
                     // thread was last open drops unrelated context into it, which is
                     // both confusing and a small privacy problem of its own.
-                    if let shortcut = destination.newChatShortcut,
+                    // Native only. On the web fallback the frontmost app is a browser,
+                    // where ⌘N opens a new *window* — so the handoff would paste into a
+                    // blank tab that never navigated anywhere.
+                    if opened.isNative,
+                       let shortcut = destination.newChatShortcut,
                        let (key, flags) = Keyboard.parse(shortcut) {
                         Keyboard.press(keyCode: key, flags: flags)
                         try? await Task.sleep(for: .milliseconds(600))

@@ -35,6 +35,9 @@ struct AIDestination: Decodable {
         /// reach a state where a keystroke means anything, and guessing one timeout
         /// for both cases is how the paste got dropped.
         let wasAlreadyRunning: Bool
+        /// False when this fell back to the web adapter — in which case the frontmost
+        /// app is a browser and the new-chat shortcut means something else entirely.
+        let isNative: Bool
     }
 
     /// Opens the destination and reports what to wait for before pasting.
@@ -48,7 +51,9 @@ struct AIDestination: Decodable {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-            return Opened(bundleID: bundleId, wasAlreadyRunning: wasRunning)
+            return Opened(
+                bundleID: bundleId, wasAlreadyRunning: wasRunning, isNative: true
+            )
         }
 
         // docs/05: destination app not installed → fall back to the web adapter.
@@ -56,6 +61,8 @@ struct AIDestination: Decodable {
         let browserBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         NSWorkspace.shared.open(url)
         guard let browserBefore else { return nil }
-        return Opened(bundleID: browserBefore, wasAlreadyRunning: true)
+        return Opened(
+            bundleID: browserBefore, wasAlreadyRunning: true, isNative: false
+        )
     }
 }

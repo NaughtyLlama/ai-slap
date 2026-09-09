@@ -15,12 +15,15 @@ final class DougView: NSView {
     var facingLeft = false { didSet { if facingLeft != oldValue { needsDisplay = true } } }
     var scale: CGFloat = 3
 
-    /// A click on Doug is a handoff. docs/04: the mascot is the button, and a mascot
-    /// that only nags gets muted.
-    var onClick: (() -> Void)?
-    /// Dropped somewhere other than where he was picked up.
-    var onDrop: ((NSPoint) -> Void)?
+    /// **Double**-click on Doug is the handoff. docs/04 makes the mascot the button, and
+    /// the first build took that literally: a single click, and a drag-and-drop, both
+    /// fired a capture. Both are also the gestures for *moving him out of the way*, so
+    /// nudging a crab off your sentence took a screenshot and pulled Claude to the front
+    /// mid-thought. Picking something up is not asking it to do something.
+    var onDoubleClick: (() -> Void)?
     var onDragged: ((NSSize) -> Void)?
+    /// Told after a drag ends, so a walk home can be rescheduled from where he now is.
+    var onDropped: (() -> Void)?
 
     private var dragOrigin: NSPoint?
     private var dragDistance: CGFloat = 0
@@ -49,14 +52,14 @@ final class DougView: NSView {
     override func mouseUp(with event: NSEvent) {
         defer { dragOrigin = nil }
         guard dragOrigin != nil else { return }
-        // Four points of slop: a click with a shaky hand is still a click, and the
-        // two gestures do the same thing anyway — this only decides which one the
-        // engine is told about.
+
         if dragDistance > 4 {
-            onDrop?(NSEvent.mouseLocation)
-        } else {
-            onClick?()
+            // He was moved. That is the whole of it — no capture, nothing brought to the
+            // front. Four points of slop, because a click with a shaky hand is a click.
+            onDropped?()
+            return
         }
+        if event.clickCount >= 2 { onDoubleClick?() }
     }
 
     override func resetCursorRects() {
@@ -150,7 +153,26 @@ final class DougWindow {
     /// this buys nothing and costs battery on a resident process.
     private static let frameRate: TimeInterval = 1.0 / 30.0
 
+    /// How far a potter about is allowed to take him from his corner.
+    ///
+    /// The first version had no limit and no return: each leg stopped wherever it ended
+    /// and the next one started from there, so he random-walked into the middle of the
+    /// screen over an afternoon and sat on top of whatever was being typed. A wander is
+    /// now a there-and-back, and this caps the *there*.
+    private static let wanderRange: CGFloat = 220
+
     var onHandoffGesture: (() -> Void)?
+
+    /// Where a handoff goes, for the tooltip. Double-click is not a discoverable gesture
+    /// on a wordless crab — hovering has to say what he does, and naming the destination
+    /// also means the setting is visible from the thing it affects.
+    var destinationName: String? {
+        didSet {
+            view.toolTip = destinationName.map {
+                "Drag to move · double-click to hand this window to \($0)"
+            } ?? "Drag to move · double-click to hand this window over"
+        }
+    }
 
     private let panel: MascotPanel
     private let view: DougView
@@ -214,9 +236,9 @@ final class DougWindow {
         panel.becomesKeyOnlyIfNeeded = true
         panel.contentView = view
 
-        view.onClick = { [weak self] in self?.handoffGesture() }
-        view.onDrop = { [weak self] _ in self?.handoffGesture() }
+        view.onDoubleClick = { [weak self] in self?.handoffGesture() }
         view.onDragged = { [weak self] delta in self?.dragBy(delta) }
+        view.onDropped = { [weak self] in self?.dropped() }
 
         // docs/04: he should end up on the screen with the active window, and survive
         // a display being unplugged mid-session.
@@ -437,11 +459,10 @@ final class DougWindow {
             }
             frame.origin.x += speed * direction
         } else {
-            if let until = walkUntil, Date() >= until {
+            let strayed = homePoint().map { abs(frame.origin.x - $0.x) } ?? 0
+            if let until = walkUntil, Date() >= until || strayed >= Self.wanderRange {
                 walkUntil = nil
-                stopFrameTimer()
-                view.needsDisplay = true
-                scheduleWander()
+                goHome()
                 return
             }
             frame.origin.x += speed * direction
@@ -461,17 +482,23 @@ final class DougWindow {
         panel.setFrameOrigin(frame.origin)
     }
 
-    /// Tier 0 is asleep, not idling. He wakes on a long random interval, scuttles for a
-    /// couple of seconds, and goes back to having no timer running at all.
+    /// Tier 0 is asleep, not idling. He wakes on a long random interval, potters a few
+    /// seconds, walks back, and returns to having no timer running at all.
+    ///
+    /// The walk back is the part that matters. Without it every leg starts from where the
+    /// last one stopped, which is a random walk — and a random walk with no restoring
+    /// force ends up in the middle of the screen, on top of whatever you are writing.
     private func scheduleWander() {
         stopWandering()
-        guard isEnabled, !isHidden, tier == .ambient, !motionIsReduced else { return }
+        guard isEnabled, !isHidden, tier == .ambient, homeTarget == nil,
+              !motionIsReduced else { return }
         let delay = TimeInterval.random(in: 70...200)
         wanderTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) {
             [weak self] _ in
-            guard let self, self.tier == .ambient else { return }
+            guard let self, self.tier == .ambient, self.homeTarget == nil else { return }
             self.walkUntil = Date().addingTimeInterval(.random(in: 1.5...4))
-            self.direction = Bool.random() ? 1 : -1
+            // Away from the corner he lives in, never further into it.
+            self.direction = -1
             self.startFrameTimer()
         }
     }
@@ -505,11 +532,24 @@ final class DougWindow {
 
     private func dragBy(_ delta: NSSize) {
         isDragging = true
+        // A wander or a walk home would fight the hand holding him.
+        homeTarget = nil
+        walkUntil = nil
+        stopWandering()
         stopFrameTimer()
         var origin = panel.frame.origin
         origin.x += delta.width
         origin.y -= delta.height  // screen coordinates are y-up; mouse deltas are not
         panel.setFrameOrigin(origin)
+    }
+
+    /// Put down. He stays exactly where he was put — walking straight back to the corner
+    /// would undo the move, and moving him is usually a request to be somewhere else.
+    /// The corner reasserts itself on the next tier, which is soon enough.
+    private func dropped() {
+        isDragging = false
+        guard tier == .ambient else { return }
+        scheduleWander()
     }
 
     private func handoffGesture() {
@@ -551,6 +591,7 @@ final class DougWindow {
     /// interrupt and otherwise stays out of your eye, and a crab ambling across the
     /// screen is the exact motion that setting exists to remove.
     private func goHome() {
+        guard !isDragging else { return }
         guard let home = homePoint() else {
             stopFrameTimer()
             view.mood = displayMood

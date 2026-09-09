@@ -20,6 +20,7 @@ final class MenuBarController {
     private var amnestyItems: [InterruptionEngine.Amnesty: NSMenuItem] = [:]
     private var budgetItems: [Int: NSMenuItem] = [:]
     private var styleItems: [InterruptionEngine.Style: NSMenuItem] = [:]
+    private let destinationItem = NSMenuItem()
     private let mascotToggleItem = NSMenuItem()
     private let calmItem = NSMenuItem()
     private var tierItems: [DougWindow.Tier: NSMenuItem] = [:]
@@ -35,6 +36,8 @@ final class MenuBarController {
     private let onShowLearned: () -> Void
     private let onTestNudge: () -> Void
     private let onSetStyle: (InterruptionEngine.Style) -> Void
+    private let onSetDestination: (String) -> Void
+    private let destinations: () -> [(id: String, name: String, installed: Bool, active: Bool)]
     private let onToggleMascot: () -> Void
     private let onToggleCalmMode: () -> Void
     private let onSetMaxTier: (DougWindow.Tier) -> Void
@@ -57,6 +60,8 @@ final class MenuBarController {
         onShowLearned: @escaping () -> Void,
         onTestNudge: @escaping () -> Void,
         onSetStyle: @escaping (InterruptionEngine.Style) -> Void,
+        onSetDestination: @escaping (String) -> Void,
+        destinations: @escaping () -> [(id: String, name: String, installed: Bool, active: Bool)],
         onToggleMascot: @escaping () -> Void,
         onToggleCalmMode: @escaping () -> Void,
         onSetMaxTier: @escaping (DougWindow.Tier) -> Void,
@@ -78,6 +83,8 @@ final class MenuBarController {
         self.onShowLearned = onShowLearned
         self.onTestNudge = onTestNudge
         self.onSetStyle = onSetStyle
+        self.onSetDestination = onSetDestination
+        self.destinations = destinations
         self.onToggleMascot = onToggleMascot
         self.onToggleCalmMode = onToggleCalmMode
         self.onSetMaxTier = onSetMaxTier
@@ -272,6 +279,10 @@ final class MenuBarController {
         handoffStatusItem.isEnabled = false
         menu.addItem(handoffStatusItem)
 
+        destinationItem.title = "Hand off to"
+        destinationItem.submenu = NSMenu()
+        menu.addItem(destinationItem)
+
         menu.addItem(.separator())
 
         // docs/04 ships this as a hotkey and a menu item, both instant.
@@ -393,6 +404,8 @@ final class MenuBarController {
             item.state = key == style ? .on : .off
         }
 
+        rebuildDestinationMenu()
+
         mascotToggleItem.title = mascotEnabled ? "Doug: on" : "Doug: off"
         mascotToggleItem.state = mascotEnabled ? .on : .off
         // Saying which one is in charge stops "I turned calm mode off and he still
@@ -455,6 +468,32 @@ final class MenuBarController {
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }
+
+    /// Rebuilt on every refresh, because whether an app is installed can change while
+    /// this is running — and a picker that lists a destination as available after it has
+    /// been deleted sends the next handoff nowhere.
+    private func rebuildDestinationMenu() {
+        let submenu = NSMenu()
+        for destination in destinations() {
+            let item = NSMenuItem(
+                title: destination.installed
+                    ? destination.name
+                    : "\(destination.name) — in the browser",
+                action: #selector(setDestination(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = destination.id
+            item.state = destination.active ? .on : .off
+            submenu.addItem(item)
+        }
+        destinationItem.submenu = submenu
+    }
+
+    @objc private func setDestination(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onSetDestination(id)
+    }
 
     private func rebuildRulesMenu() {
         let submenu = NSMenu()

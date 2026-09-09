@@ -48,6 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             onShowLearned: { [weak self] in self?.showLearned() },
             onTestNudge: { [weak self] in self?.testNudge() },
             onSetStyle: { [weak self] in self?.setStyle($0) },
+            onSetDestination: { [weak self] in self?.setDestination($0) },
+            destinations: { [weak self] in self?.destinationChoices() ?? [] },
             onToggleMascot: { [weak self] in self?.toggleMascot() },
             onToggleCalmMode: { [weak self] in self?.toggleCalmMode() },
             onSetMaxTier: { [weak self] in self?.setMaxTier($0) },
@@ -130,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         requestAccessibilityIfNeeded()
         observer.start()
         refreshMenu()
+
+        doug.destinationName = engine?.handoff.preferredDestination?.name
+        // After the menu bar exists, so the answer has somewhere to be reflected.
+        askForDestinationIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -364,6 +370,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             prompt: "Nothing was logged. Your real nudges use these same buttons.",
             anchor: doug.frameOnScreen
         ) { [weak self] _ in self?.doug.reset() }
+    }
+
+    private func destinationChoices()
+        -> [(id: String, name: String, installed: Bool, active: Bool)]
+    {
+        guard let handoff = engine?.handoff else { return [] }
+        let active = handoff.preferredDestination?.id
+        return handoff.availableDestinations.map {
+            (id: $0.id, name: $0.name, installed: $0.isNativeAvailable, active: $0.id == active)
+        }
+    }
+
+    private func setDestination(_ id: String) {
+        Handoff.preferredID = id
+        Handoff.hasChosenDestination = true
+        doug.destinationName = engine?.handoff.preferredDestination?.name
+        refreshMenu()
+    }
+
+    /// Asked once, on the first run that has a choice to offer.
+    ///
+    /// The handoff used to go to whichever supported app happened to be installed first
+    /// in the rulebook's order, which is fine only if everyone uses that one. Someone who
+    /// works in ChatGPT would have had their window quietly pasted into Claude.
+    private func askForDestinationIfNeeded() {
+        guard let handoff = engine?.handoff, !Handoff.hasChosenDestination else { return }
+        let choices = handoff.availableDestinations
+        // Nothing to ask about if there is only one answer.
+        guard choices.count > 1 else {
+            Handoff.hasChosenDestination = true
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Where should AI-slap send your work?"
+        alert.informativeText =
+            "When you hand a window over, it opens here with your prompt already written. "
+            + "Nothing is ever sent for you — you read it and press return yourself.\n\n"
+            + "You can change this any time from the menu."
+        alert.alertStyle = .informational
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
+        for choice in choices {
+            popup.addItem(withTitle: choice.isNativeAvailable
+                ? choice.name
+                : "\(choice.name) — in the browser")
+            popup.lastItem?.representedObject = choice.id
+        }
+        // Default the selection to whatever it would have used anyway.
+        if let current = handoff.preferredDestination?.id,
+           let index = choices.firstIndex(where: { $0.id == current }) {
+            popup.selectItem(at: index)
+        }
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Use this")
+
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+
+        if let id = popup.selectedItem?.representedObject as? String {
+            setDestination(id)
+        } else {
+            Handoff.hasChosenDestination = true
+        }
     }
 
     private func setStyle(_ style: InterruptionEngine.Style) {

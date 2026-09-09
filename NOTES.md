@@ -322,3 +322,57 @@ away on three sides.
 
 `design-preview.sh` now renders the sheet on a split dark/white ground, since a single
 background can no longer answer the question.
+
+### A wander needs a restoring force, or it is a random walk
+
+Tier 0 woke Doug every 70–200 seconds, walked him in a random direction for a few
+seconds, and stopped him wherever that ended. The next leg then started from *there*.
+That is a random walk, and a random walk with nothing pulling it back does exactly what
+random walks do: over an afternoon he drifted into the middle of the screen and sat on top
+of the sentence Chen was writing.
+
+The bug is invisible in a single leg and obvious after an hour, which is the whole
+category. A wander is now a there-and-back — out, then home — and the outbound leg is
+capped at `wanderRange` so he cannot reach the middle of the screen even once. Both halves
+matter: the cap alone would still leave him parked wherever he stopped.
+
+### Picking something up is not asking it to do something
+
+docs/04's "the goose is the button" was implemented literally: a single click on Doug ran
+a handoff, and so did dragging and dropping him. Both of those are also the gestures for
+*moving him out of the way*. So nudging a crab off your own sentence took a screenshot of
+your window and pulled Claude to the front, mid-thought. Chen's words: "clicking to move
+takes a screenshot and breaks my workflow."
+
+Now: drag moves him and does nothing else, and **double-click** is the handoff. The design
+rule survives — every tier still terminates in one gesture to the handoff — it just is no
+longer the same gesture as "get out of my way".
+
+The cost is discoverability: double-click is not a guessable gesture on a wordless crab.
+He carries a tooltip that names both gestures and the destination, which is the smallest
+thing that could work. If the gesture turns out to go unused, that is the first suspect.
+
+Doug also stays where he is put. Walking straight back to the corner would undo the move,
+and moving him is usually a request for him to be somewhere else. The corner reasserts
+itself at the next tier, which is soon enough.
+
+### The destination was a property of list order, not a choice
+
+`preferredDestination` returned the first natively installed entry in the rulebook. That
+is indistinguishable from correct as long as everyone uses the app at the top of the list.
+For anyone who works in ChatGPT or Gemini it silently pasted their window into an app they
+do not use.
+
+The rulebook already had the right shape — destinations are data, not code, so adding
+Gemini and Perplexity was a data change. What was missing was a choice: a stored id
+consulted first, a picker in the menu, and a question on first run. The old behaviour is
+still the fallback, and deliberately: a chosen destination whose app has since been
+uninstalled should degrade to something working rather than to a failed handoff and a
+lost capture.
+
+One bug fell out of looking at it. `newChatShortcut` was sent whenever the destination
+defined one, including on the web fallback — where the frontmost app is a browser and ⌘N
+opens a new *window*, so the handoff pasted into a blank tab that had never navigated
+anywhere. It is now sent only when the native app was the thing that opened. This never
+bit Chen because Claude's native app is installed; it would have bitten the first
+Perplexity user immediately.

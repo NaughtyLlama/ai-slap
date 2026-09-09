@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
   "version": "2026.08.14",
-
   "_comment": [
     "The baked-in default rulebook. docs/03 requires this to become a remote,",
     "Ed25519-signed artifact in Phase 2 — a title-format change at Gmail must be",
@@ -12,7 +11,6 @@
     "from any one person's log. Personalisation is a separate layer: the rulebook",
     "says what a context IS, the Personaliser learns what is unusual FOR YOU."
   ],
-
   "aiContexts": {
     "_comment": [
       "Seeing any of these opens a grace window and suppresses every rule.",
@@ -55,7 +53,6 @@
       "(?i)^Le Chat\\b"
     ]
   },
-
   "suppression": {
     "_comment": [
       "docs/04: the mascot must vanish during anything being watched by other people.",
@@ -81,7 +78,6 @@
       "com.tinyspeck.slackmacgap.huddle"
     ]
   },
-
   "destinations": [
     {
       "id": "claude",
@@ -98,9 +94,24 @@
       "webURL": "https://chatgpt.com",
       "newChatShortcut": "cmd+n",
       "acceptsPastedImage": true
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "bundleId": "com.google.GeminiMacOS",
+      "webURL": "https://gemini.google.com/app",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
+    },
+    {
+      "id": "perplexity",
+      "name": "Perplexity",
+      "bundleId": null,
+      "webURL": "https://www.perplexity.ai/",
+      "newChatShortcut": null,
+      "acceptsPastedImage": true
     }
   ],
-
   "browserBundleIds": [
     "com.google.Chrome",
     "com.apple.Safari",
@@ -111,7 +122,6 @@
     "com.vivaldi.Vivaldi",
     "com.operasoftware.Opera"
   ],
-
   "rules": [
     {
       "id": "email.message.dwell",
@@ -126,7 +136,11 @@
       ],
       "match": {
         "useBrowserBundles": true,
-        "extraBundleIds": ["com.apple.mail", "com.microsoft.Outlook", "com.readdle.smartemail-Mac"],
+        "extraBundleIds": [
+          "com.apple.mail",
+          "com.microsoft.Outlook",
+          "com.readdle.smartemail-Mac"
+        ],
         "titlePatterns": [
           "^.+ - [^ @]+@[^ ]+ - (Gmail|.+ Mail)( - .*)?$",
           "^.+ - Outlook( - .*)?$",
@@ -140,7 +154,10 @@
           "^(受信トレイ|送信済みメール|下書き)\\b"
         ]
       },
-      "condition": { "dwellMs": 90000, "noAiContextForMs": 600000 },
+      "condition": {
+        "dwellMs": 90000,
+        "noAiContextForMs": 600000
+      },
       "confidence": 0.8,
       "cooldownMs": 3600000,
       "nudge": {
@@ -148,7 +165,6 @@
         "promptTemplate": "Here's an email I need to reply to. Draft a concise reply in my voice."
       }
     },
-
     {
       "id": "email.inbox.dwell",
       "enabled": true,
@@ -160,13 +176,19 @@
       ],
       "match": {
         "useBrowserBundles": true,
-        "extraBundleIds": ["com.apple.mail", "com.microsoft.Outlook"],
+        "extraBundleIds": [
+          "com.apple.mail",
+          "com.microsoft.Outlook"
+        ],
         "titlePatterns": [
           "^Inbox( \\(\\d+\\))? - .+ - (Gmail|.+ Mail)( - .*)?$",
           "^(Inbox|Boîte de réception|Posteingang|Bandeja de entrada)\\b.*"
         ]
       },
-      "condition": { "dwellMs": 240000, "noAiContextForMs": 600000 },
+      "condition": {
+        "dwellMs": 240000,
+        "noAiContextForMs": 600000
+      },
       "confidence": 0.45,
       "cooldownMs": 10800000,
       "nudge": {
@@ -174,7 +196,6 @@
         "promptTemplate": "Help me triage and draft replies for a backlog of email."
       }
     },
-
     {
       "id": "chat.thread.dwell",
       "enabled": true,
@@ -193,7 +214,10 @@
           "\\bDiscord\\b"
         ]
       },
-      "condition": { "dwellMs": 120000, "noAiContextForMs": 600000 },
+      "condition": {
+        "dwellMs": 120000,
+        "noAiContextForMs": 600000
+      },
       "confidence": 0.6,
       "cooldownMs": 5400000,
       "nudge": {
@@ -201,7 +225,6 @@
         "promptTemplate": "Help me write a clear response to this conversation thread."
       }
     },
-
     {
       "id": "doc.dwell",
       "enabled": true,
@@ -224,7 +247,10 @@
           "^Untitled document\\b"
         ]
       },
-      "condition": { "dwellMs": 150000, "noAiContextForMs": 600000 },
+      "condition": {
+        "dwellMs": 150000,
+        "noAiContextForMs": 600000
+      },
       "confidence": 0.65,
       "cooldownMs": 5400000,
       "nudge": {
@@ -232,21 +258,26 @@
         "promptTemplate": "Help me outline and draft this document."
       }
     },
-
     {
       "id": "sheet.dwell",
       "enabled": true,
       "category": "sheet",
       "match": {
         "useBrowserBundles": true,
-        "extraBundleIds": ["com.microsoft.Excel", "com.apple.iWork.Numbers"],
+        "extraBundleIds": [
+          "com.microsoft.Excel",
+          "com.apple.iWork.Numbers"
+        ],
         "titlePatterns": [
           " - Google Sheets( - .*)?$",
           " - Excel( - .*)?$",
           " - Numbers( - .*)?$"
         ]
       },
-      "condition": { "dwellMs": 180000, "noAiContextForMs": 600000 },
+      "condition": {
+        "dwellMs": 180000,
+        "noAiContextForMs": 600000
+      },
       "confidence": 0.6,
       "cooldownMs": 5400000,
       "nudge": {
@@ -254,7 +285,6 @@
         "promptTemplate": "Help me with this spreadsheet — formulas, cleanup, or analysis."
       }
     },
-
     {
       "id": "search.repeated",
       "enabled": true,
@@ -283,7 +313,6 @@
         "promptTemplate": "I've been searching for this without luck. Answer it properly."
       }
     },
-
     {
       "id": "surface.grind",
       "enabled": true,
@@ -303,7 +332,10 @@
         "generalises to whichever tools a given person actually grinds in rather than",
         "the ones we thought to enumerate."
       ],
-      "match": { "unrecognised": true, "useBrowserBundles": true },
+      "match": {
+        "unrecognised": true,
+        "useBrowserBundles": true
+      },
       "condition": {
         "dwellMs": 30000,
         "noAiContextForMs": 600000,
@@ -316,14 +348,18 @@
         "promptTemplate": "I keep doing repetitive setup work in a web tool. Help me speed this up or automate it."
       }
     },
-
     {
       "id": "timer.checkin",
       "enabled": false,
       "category": "any",
       "_comment": "docs/03: the second source quote, built literally. Context-free, so it can never be wrong. Default off, user turns it on.",
-      "match": { "matchesAnything": true },
-      "condition": { "dwellMs": 1500000, "noAiContextForMs": 1500000 },
+      "match": {
+        "matchesAnything": true
+      },
+      "condition": {
+        "dwellMs": 1500000,
+        "noAiContextForMs": 1500000
+      },
       "confidence": 0.5,
       "cooldownMs": 1500000,
       "nudge": {
