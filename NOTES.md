@@ -294,3 +294,31 @@ than `.sleep`, since a sleeping face on a moving crab reads as a bug.
 The trigger is a context change, which is the same signal that resets the ladder — so he
 heads home when you switch to *anything*, and the AI apps that prompted the request are
 covered by the rulebook's own list rather than by a special case for one of them.
+
+### Correction: no silhouette colour survives both, so he carries a keyline
+
+The entry above — swapping Doug's two flat colours so he reads on a dark desktop — was
+half a fix, and the other half showed up within a day. Chen put him on a white window and
+the cream silhouette disappeared exactly as the near-black one had against the desktop.
+
+The mistake was in the framing, not the colour. **A desktop mascot is almost never on the
+desktop.** He stands on top of whatever window you are working in, and those are white as
+often as not. Choosing a silhouette colour is choosing which half of the day he is
+invisible for, and following the system light/dark setting only describes the desktop —
+the surface he is least often standing on. Reading the actual pixels behind him would need
+Screen Recording, which this app refuses.
+
+So he carries both colours instead: the design file's ink silhouette exactly as drawn,
+wrapped in a one-cell paper keyline. One of the two always contrasts, on any backdrop,
+without needing to know what the backdrop is. `Palette.onDesktop` is gone and the sprite
+is back to the canvas's own palette, which is a happier place for it to be — the halo is
+an addition to the character rather than a change to it.
+
+Two mechanical notes. The halo is a **ring**, not a fill: filling the silhouette and
+drawing on top looks identical on a shape with no holes and swallows Doug's legs, which
+have gaps the ring is meant to trace. And the sprite gained a one-cell margin on every
+side (`haloPad`), because without it the keyline is drawn outside the view and clipped
+away on three sides.
+
+`design-preview.sh` now renders the sheet on a split dark/white ground, since a single
+background can no longer answer the question.

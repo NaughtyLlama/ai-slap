@@ -29,6 +29,10 @@ enum Doug {
     /// How far the accent plate is pushed down and right, in points, at any scale.
     static let misregistration: CGFloat = 2
 
+    /// One cell of clear space on every side, so the keyline has somewhere to be drawn.
+    /// Without it the halo falls outside the view and is clipped away on three sides.
+    static let haloPad = 1
+
     /// Where the CRT screen sits inside the shell, in grid cells. The face is drawn
     /// into this window and nowhere else.
     static let screen = (x: 5, y: 5, width: 14, height: 7)
@@ -142,30 +146,59 @@ enum Doug {
             accent: NSColor(srgbRed: 1.000, green: 0.243, blue: 0.604, alpha: 1)  // #FF3E9A
         )
 
-        /// **What Doug himself is painted with**, and the one place the design file's
-        /// palette had to be reversed rather than copied.
+        /// The one-pixel halo drawn around Doug's whole silhouette, and the reason he
+        /// can stand anywhere.
         ///
-        /// The canvas sits him on paper, so his silhouette is drawn in near-black ink and
-        /// reads perfectly. A desktop is not paper. The first time he appeared on a real
-        /// dark desktop the outline and all four legs vanished into the background and he
-        /// read as a floating pink CRT with no body.
+        /// This is the second attempt. The first was a palette swap: the canvas sits him
+        /// on paper, so his silhouette is near-black ink, and on a dark desktop that
+        /// silhouette *is* the background — the outline and all four legs vanished and he
+        /// read as a floating pink CRT. Reversing the two flat colours fixed the dark
+        /// desktop and broke the light one, because a mascot does not stay on the
+        /// desktop: he stands on top of whatever window you are working in, and half of
+        /// those are white.
         ///
-        /// So the two flat colours swap: cream silhouette, dark bezel, accent untouched.
-        /// Deliberately *not* switched on the system appearance — he cannot see the
-        /// wallpaper behind him without Screen Recording, which this app refuses, so
-        /// following light mode would only move the failure rather than fix it. One look,
-        /// chosen for the desktop he actually lives on.
-        static let onDesktop = Palette(
-            paper: standard.ink,
-            ink: standard.paper,
-            accent: standard.accent
-        )
+        /// **No single choice of silhouette colour survives both.** Following the system
+        /// appearance does not either — it describes the desktop, and he is rarely on it.
+        /// So he carries both colours: the design file's ink silhouette exactly as drawn,
+        /// wrapped in a paper keyline. One of the two always contrasts, on any backdrop,
+        /// without needing to know what the backdrop is — which matters because reading
+        /// it would need Screen Recording, and this app refuses that.
+        static let keyline = standard.paper
     }
 
+    /// The cells that are empty but touch a solid one — the halo's footprint.
+    ///
+    /// Computed once. It is only a few hundred cells, but it is otherwise recomputed on
+    /// every frame of every walk, and `docs/04` budgets this character in fractions of a
+    /// percent of CPU.
+    ///
+    /// Note this is a *ring*, not a fill. Filling the silhouette and drawing on top of it
+    /// looks identical on a shape with no holes and swallows Doug's legs, which have gaps
+    /// between them that the ring is supposed to trace.
+    static let halo: [(x: Int, y: Int)] = {
+        func solid(_ x: Int, _ y: Int) -> Bool {
+            guard y >= 0, y < shell.count else { return false }
+            let row = Array(shell[y])
+            guard x >= 0, x < row.count else { return false }
+            return row[x] != "."
+        }
+        var cells: [(x: Int, y: Int)] = []
+        for y in -1...gridHeight {
+            for x in -1...gridWidth where !solid(x, y) {
+                let touching = (-1...1).contains { dy in
+                    (-1...1).contains { dx in solid(x + dx, y + dy) }
+                }
+                if touching { cells.append((x, y)) }
+            }
+        }
+        return cells
+    }()
+
     static func size(scale: CGFloat) -> NSSize {
-        NSSize(
-            width: CGFloat(gridWidth) * scale + misregistration,
-            height: CGFloat(gridHeight) * scale + misregistration
+        let padding = CGFloat(haloPad * 2) * scale
+        return NSSize(
+            width: CGFloat(gridWidth) * scale + padding + misregistration,
+            height: CGFloat(gridHeight) * scale + padding + misregistration
         )
     }
 
@@ -177,7 +210,7 @@ enum Doug {
         scale: CGFloat,
         legFrame: Bool = false,
         facingLeft: Bool = false,
-        palette: Palette = .onDesktop
+        palette: Palette = .standard
     ) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.saveGState()
@@ -196,10 +229,21 @@ enum Doug {
             for (offset, row) in legsAlternate.enumerated() { rows[17 + offset] = row }
         }
 
-        let off = misregistration
+        // Every coordinate below is pushed in by one cell to leave room for the keyline,
+        // which is the only thing allowed to occupy that margin.
+        let pad = CGFloat(haloPad) * scale
+
+        // Drawn before anything else, so every plate lands on top of it.
+        Palette.keyline.setFill()
+        for cell in halo {
+            NSRect(x: CGFloat(cell.x) * scale + pad, y: CGFloat(cell.y) * scale + pad,
+                   width: scale, height: scale).fill()
+        }
+
+        let off = misregistration + pad
         plate(rows, matching: ["P", "S"], color: palette.accent, scale: scale, offset: off)
-        plate(rows, matching: ["W"], color: palette.paper, scale: scale, offset: 0)
-        plate(rows, matching: ["K"], color: palette.ink, scale: scale, offset: 0)
+        plate(rows, matching: ["W"], color: palette.paper, scale: scale, offset: pad)
+        plate(rows, matching: ["K"], color: palette.ink, scale: scale, offset: pad)
 
         // The face rides on the accent plate, so it takes the same offset — otherwise
         // it floats free of the screen it is supposed to be inside.

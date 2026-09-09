@@ -11,9 +11,13 @@ let H = (cell.height + pad) * CGFloat(rows) + pad
 
 let image = NSImage(size: NSSize(width: W, height: H))
 image.lockFocus()
-// A dark ground, because that is what Doug.Palette.onDesktop is drawn for.
+// Split ground: dark on the left, white on the right. Doug lives on top of whatever
+// window you are working in, so neither one alone is the test — the keyline exists
+// precisely because no single silhouette colour survives both.
 NSColor(srgbRed: 0.07, green: 0.07, blue: 0.07, alpha: 1).setFill()
-NSRect(x: 0, y: 0, width: W, height: H).fill()
+NSRect(x: 0, y: 0, width: W / 2, height: H).fill()
+NSColor(srgbRed: 0.96, green: 0.97, blue: 0.98, alpha: 1).setFill()
+NSRect(x: W / 2, y: 0, width: W / 2, height: H).fill()
 
 var tiles: [(String, Doug.Mood, Bool, Bool)] = moods.map { ($0.rawValue, $0, false, false) }
 tiles.append(("walk", .grumpy, true, false))
@@ -33,7 +37,7 @@ for (index, tile) in tiles.enumerated() {
 
     let label = NSAttributedString(string: tile.0, attributes: [
         .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
-        .foregroundColor: NSColor.white,
+        .foregroundColor: x + 40 > W / 2 ? NSColor.black : NSColor.white,
     ])
     label.draw(at: NSPoint(x: x, y: y - 16))
 }
