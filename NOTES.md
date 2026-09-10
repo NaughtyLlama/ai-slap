@@ -463,3 +463,56 @@ Worse, deleting the leftover `AISlap.cstemp` by hand while `codesign` still held
 produced a bundle that passes `codesign -v` on disk and is then `SIGKILL`ed at launch with
 `Code Signature Invalid`. **A valid signature on disk is not the same as valid pages at
 load.** The fix is `rm -rf build` and a clean rebuild; there is no partial repair.
+
+### The worst nudge this product has fired, and the one-line reason
+
+Chen was working in ChatGPT and got a nudge telling him to hand his work to AI. Screenshot
+and all. `surface.returns` had counted thirteen returns to a surface called "ChatGPT" and
+interrupted him inside it.
+
+`ChatGPT.app` ships as **`com.openai.codex`**. The rulebook asserted `com.openai.chat`,
+which is not installed on any machine checked — so the native ChatGPT app was never an AI
+context, the amnesty never applied to it, and `interruptedSignatures` never cleared there.
+The same wrong id sat in the `destinations` list, meaning anyone choosing ChatGPT as their
+handoff target would have silently fallen through to the web adapter with a working app
+sitting in `/Applications`.
+
+**The rule was innocent.** Nothing about `surface.returns` was wrong; it was simply the
+first rule capable of reaching a surface that had been mis-classified since the rulebook
+was written. Every dwell rule needs a long sit, and nobody sits in ChatGPT for 79 seconds
+without typing — which is exactly why the defect could sit there for months looking like
+silence.
+
+Two fixes, and the second is the one that matters:
+
+1. The id is corrected in both places.
+2. **Every configured destination's bundle id now counts as an AI context, derived rather
+   than listed.** A hand-maintained list will drift again — vendors rename, ship second
+   apps, fork. But the app you hand work *to* can never be a place you are failing to use
+   AI, so this particular absurdity is now structurally impossible instead of a
+   list-maintenance problem.
+
+Auditing the rest of the rulebook against `mdfind` found nothing else wrong for the apps
+installed here. Worth doing on any bundle id before asserting it: `mdfind
+"kMDItemCFBundleIdentifier == 'x'"` settles in a second what a plausible-looking string
+cannot.
+
+### ⚠️ Slack huddles are not suppressed, and the fix is not obvious
+
+Found during the same audit. The conferencing list carries
+`com.tinyspeck.slackmacgap.huddle`, but a huddle never becomes the frontmost *application*
+— Slack is `com.tinyspeck.slackmacgap`, and that is what the detector sees. So Doug does
+not vanish during a huddle, which is precisely the docs/04 scenario described as the
+anecdote that kills the company.
+
+The obvious fix is wrong. Adding `com.tinyspeck.slackmacgap` suppresses Slack entirely,
+all day, and Slack is also a legitimate nudge surface — `chat.thread` matches it. Trading a
+working rule for a suppression that fires constantly is a bad deal.
+
+Doing it properly needs either the huddle window's title or camera/mic in-use state, and
+the latter is the deferred `AVCaptureDevice` work docs/04 already flags. Left alone
+deliberately, and marked, because it is a decision rather than a bug. **Until it is
+resolved, ⌥⌘G before any call.**
+
+Same shape, same section: `com.google.Chrome.app.meet` only matches Meet installed as a
+Chrome app. Meet in an ordinary tab reports as Chrome and does not suppress.

@@ -155,7 +155,21 @@ final class InterruptionEngine {
         self.suppression = Suppression(
             conferencingBundleIDs: rulebook.suppression.conferencingBundleIds
         )
+        // Every configured handoff destination counts as an AI context, on top of the
+        // hand-maintained list.
+        //
+        // This is not a convenience — it closes the hole that produced the worst nudge
+        // this product has fired. `ChatGPT.app` ships as `com.openai.codex`; the
+        // rulebook asserted `com.openai.chat`, which is not installed on any machine
+        // checked. So the app was invisible as an AI surface, and the first rule capable
+        // of reaching it interrupted Chen *inside ChatGPT* to suggest he use AI.
+        //
+        // A hand-maintained bundle list will drift again — vendors rename, ship second
+        // apps, fork. But **the app you hand work to can never be a place you are failing
+        // to use AI**, so deriving these from the destinations makes that specific
+        // absurdity structurally impossible rather than a list-maintenance problem.
         self.aiBundleIDs = Set(rulebook.aiContexts.bundleIds)
+            .union(rulebook.destinations.compactMap(\.bundleId))
         self.aiBrowserTitlePatterns = rulebook.aiContexts.browserTitlePatterns
             .compactMap(CompiledRule.compile)
         self.browserBundleIDs = Set(rulebook.browserBundleIds)

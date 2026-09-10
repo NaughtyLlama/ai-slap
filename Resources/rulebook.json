@@ -34,6 +34,7 @@
     "bundleIds": [
       "com.anthropic.claudefordesktop",
       "com.openai.chat",
+      "com.openai.codex",
       "com.google.GeminiMacOS",
       "com.todesktop.230313mzl4w4u92",
       "com.exafunction.windsurf"
@@ -90,7 +91,7 @@
     {
       "id": "chatgpt",
       "name": "ChatGPT",
-      "bundleId": "com.openai.chat",
+      "bundleId": "com.openai.codex",
       "webURL": "https://chatgpt.com",
       "newChatShortcut": "cmd+n",
       "acceptsPastedImage": true
