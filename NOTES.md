@@ -376,3 +376,90 @@ opens a new *window*, so the handoff pasted into a blank tab that had never navi
 anywhere. It is now sent only when the native app was the thing that opened. This never
 bit Chen because Claude's native app is installed; it would have bitten the first
 Perplexity user immediately.
+
+### The nudges were rare for a reason nobody had measured
+
+Chen asked why nudges were so infrequent. The first answer given was wrong, and the way it
+was wrong is worth keeping.
+
+**The wrong answer:** the raw log shows his longest single sit on one email in a week was
+81 seconds, against `email.message.dwell`'s 90-second threshold — so the rule could never
+fire. Checked against the data, confidently stated, and false. The engine never uses the
+rulebook's number: `Personalizer.dwellThreshold` replaces it with the person's own p85.
+His real bars are 46s for email, 79s for chat threads, 104s for docs. Reading the data the
+code consumes is not the same as reading the code path that consumes it.
+
+**The real answer.** Twenty-two moments in that week cleared their learned bar. Six nudges
+fired. So thresholds were not the constraint — sixteen qualifying moments were killed
+*after* qualifying, by the confidence gate:
+
+```
+adjusted = confidence × trustMultiplier(rule) × receptivityMultiplier(hour)
+```
+
+`trustMultiplier` is a posterior over that rule's own accepted/dismissed record, clamped
+to [0.4, 1.6]. Chen's record is 3 accepted against 23 dismissed, which puts every rule at
+or just under the firing threshold even on the pushiest setting. `chat.thread.dwell`
+computes to **0.346 against a 0.35 bar**. It is losing by four thousandths.
+
+**And most of those 23 dismissals were never dismissals.** `NudgePanel.Response.ignored`
+— the five-minute timeout — was recorded as `.dismissed`, so a panel that appeared while
+he was mid-sentence and one he deliberately turned down were the same row in the database.
+Silence was training the product to stop talking, and no query could tell the two apart
+because the distinction was destroyed at write time.
+
+That is the most expensive bug found in this product so far, and it is four lines of enum.
+
+`ignored` is now its own outcome. It is excluded from the trust posterior entirely — an
+unanswered panel is evidence about the *moment*, not about the rule — and it feeds the
+consecutive-dismissal backoff at half the weight of a real refusal, so a rule nobody ever
+engages with still goes quiet, it just takes twice as much of it.
+
+**Caveat that matters:** the fix only applies going forward. The 23 historical rows stay
+`dismissed` and stay inside the 60-day tally window, so trust recovers slowly unless the
+outcome history is cleared. That is the user's data and the user's call.
+
+### Frequency, not duration — the shape no rule could see
+
+The same log said something the rules had no vocabulary for. Chen touched chat threads 103
+times in a week, averaging 52 seconds. Email surfaces 28 times, averaging 14 seconds. Every
+rule in the book asks *"have you been sitting here a while?"* and the answer is always no —
+not because he isn't grinding away by hand, but because his grinding is spread across
+dozens of short returns rather than one long sit.
+
+`surface.returns` counts returns to the *same* surface inside a window, each visit shorter
+than a ceiling. Glances are excluded at the bottom on the usual reasoning, and long sits at
+the top, so it cannot fight the dwell rules over the same moment.
+
+The awkward part was arming it. `bestRule` picks the single highest-confidence rule
+claiming a context, so on an email `email.message.dwell` wins at 0.80 and the returns rule
+is never asked — which is exactly backwards, since email is where returns are the only
+signal available. A returns rule is therefore armed *alongside* the winner rather than
+instead of it. Both still pass every gate, and the already-nudged-about-this set stops the
+two doubling up.
+
+Backtested against Chen's week, a threshold of 12 returns in 90 minutes would have fired on
+two surfaces. That is two or three extra nudges a week, not a transformation, and it should
+be described that way. The trust fix is the bigger lever by far.
+
+### Five outings instead of one
+
+Chen: "the movement of the guy on the screen is nice, but he's doing the same thing every
+time. that's boring. either no movement or variable movement."
+
+The wander was one routine — walk one direction for a few seconds, come back. A wander is
+now a short script of beats (walk, pause, look, turn) drawn from five shapes with speeds
+and durations randomised inside each. One shape involves no travel at all: he turns, looks
+around, and settles. That one does the most work, because it breaks the assumption that
+Doug moving means Doug going somewhere.
+
+### Two build lessons, cheap to learn twice
+
+`codesign` blocked on a keychain prompt that only exists because the signing identity's
+partition list had lapsed — the gotcha `scripts/make-signing-identity.sh` was written to
+prevent. It presents as a hung build with no output.
+
+Worse, deleting the leftover `AISlap.cstemp` by hand while `codesign` still held it
+produced a bundle that passes `codesign -v` on disk and is then `SIGKILL`ed at launch with
+`Code Signature Invalid`. **A valid signature on disk is not the same as valid pages at
+load.** The fix is `rm -rf build` and a clean rebuild; there is no partial repair.

@@ -311,9 +311,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             case .accept:     outcome = .accepted
             case .alreadyDid: outcome = .alreadyDid
             case .mute:       outcome = .muted
-            // An ignored panel is a soft no, not silence: docs/03 wants it feeding the
-            // backoff, or a rule nobody engages with never learns that.
-            case .dismiss, .ignored: outcome = .dismissed
+            case .dismiss:    outcome = .dismissed
+            // Recorded as its own thing, not as a dismissal. See SessionStore.Outcome:
+            // writing these two down identically taught the Personaliser to read
+            // "he was busy" as "he said no".
+            case .ignored:    outcome = .ignored
             }
             if outcome == .accepted || outcome == .alreadyDid {
                 // The mood loop from docs/04, and the only time he is ever delighted.

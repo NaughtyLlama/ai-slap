@@ -204,13 +204,23 @@ final class Personalizer {
     }
 
     /// Dismissals in a row, most recent first, stopping at the first non-dismissal.
+    /// How many refusals in a row, counting an unanswered panel as half of one.
+    ///
+    /// docs/03 wants dismissals feeding the backoff rather than accumulating as
+    /// silence, and that intent survives here — but only once the two are told apart.
+    /// A rule nobody ever answers should still go quiet eventually; it should just take
+    /// twice as much of it, because being ignored while typing is not the same as being
+    /// turned down.
     private func consecutiveDismissals(_ ruleID: String) -> Int {
-        var streak = 0
+        var weight = 0.0
         for outcome in store.recentOutcomes(ruleID: ruleID, limit: 12) {
-            guard outcome == .dismissed else { break }
-            streak += 1
+            switch outcome {
+            case .dismissed: weight += 1
+            case .ignored:   weight += 0.5
+            default:         return Int(weight)
+            }
         }
-        return streak
+        return Int(weight)
     }
 
     private func humanised(_ interval: TimeInterval) -> String {

@@ -146,6 +146,22 @@ final class DougWindow {
         }
     }
 
+    /// One movement of an outing. A wander is a short script of these rather than a
+    /// single fixed walk.
+    ///
+    /// The first version had exactly one routine — walk one direction for a few seconds,
+    /// come back — so every outing was identical and the character read as a loop rather
+    /// than an animal. Chen's note: "he's doing the same thing every time. that's
+    /// boring." A repertoire costs almost nothing here because the beats compose.
+    private enum Beat {
+        case walk(seconds: TimeInterval, speed: CGFloat, away: Bool)
+        case pause(seconds: TimeInterval)
+        /// Stand still, wearing a different face. The cheapest kind of life: he does not
+        /// have to move to be doing something.
+        case look(Doug.Mood, seconds: TimeInterval)
+        case turn
+    }
+
     /// docs/04 caps the cursor tug hard, and this is the cap.
     static let hardModeInterval: TimeInterval = 60 * 60
 
@@ -186,7 +202,9 @@ final class DougWindow {
     private var isDragging = false
     private var phase = 0
     private var direction: CGFloat = -1
-    private var walkUntil: Date?
+    private var beats: [Beat] = []
+    private var beatUntil: Date?
+    private var beatSpeed: CGFloat = 1.2
     private var scuttleTarget: CGFloat?
     private var homeTarget: NSPoint?
     private var lastCursorTug: Date?
@@ -329,7 +347,7 @@ final class DougWindow {
         focusFrame = focus ?? focusedWindowFrame()
         scuttleTarget = nil
         homeTarget = nil
-        walkUntil = nil
+        stopWandering()
 
         switch newTier {
         case .ambient:
@@ -458,15 +476,38 @@ final class DougWindow {
                 return
             }
             frame.origin.x += speed * direction
-        } else {
+        } else if !beats.isEmpty {
+            guard let beat = beats.first else { return }
             let strayed = homePoint().map { abs(frame.origin.x - $0.x) } ?? 0
-            if let until = walkUntil, Date() >= until || strayed >= Self.wanderRange {
-                walkUntil = nil
-                goHome()
+            let expired = beatUntil.map { Date() >= $0 } ?? true
+
+            switch beat {
+            case .walk(_, let beatSpeed, let away):
+                // The cap is checked mid-beat, not just at the end: a long slow amble
+                // and a short fast dash both have to stop at the same fence.
+                if expired || strayed >= Self.wanderRange {
+                    nextBeat()
+                    return
+                }
+                // Home sits bottom-right, so "away" is leftward.
+                direction = away ? -1 : 1
+                view.facingLeft = direction < 0
+                frame.origin.x += beatSpeed * direction
+
+            case .pause, .look:
+                view.legFrame = false
+                if expired { nextBeat() }
+                return
+
+            case .turn:
+                view.facingLeft.toggle()
+                view.needsDisplay = true
+                nextBeat()
                 return
             }
-            frame.origin.x += speed * direction
-            view.facingLeft = direction < 0
+        } else {
+            goHome()
+            return
         }
 
         if let bounds = currentScreen?.visibleFrame {
@@ -496,9 +537,18 @@ final class DougWindow {
         wanderTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) {
             [weak self] _ in
             guard let self, self.tier == .ambient, self.homeTarget == nil else { return }
-            self.walkUntil = Date().addingTimeInterval(.random(in: 1.5...4))
-            // Away from the corner he lives in, never further into it.
-            self.direction = -1
+            self.beats = self.randomOuting()
+            guard let first = self.beats.first else { return }
+            switch first {
+            case .walk(let seconds, let speed, _):
+                self.beatUntil = Date().addingTimeInterval(seconds)
+                self.beatSpeed = speed
+            case .pause(let seconds), .look(_, let seconds):
+                self.beatUntil = Date().addingTimeInterval(seconds)
+            case .turn:
+                self.beatUntil = Date()
+            }
+            if case .look(let mood, _) = first { self.view.mood = mood }
             self.startFrameTimer()
         }
     }
@@ -506,6 +556,77 @@ final class DougWindow {
     private func stopWandering() {
         wanderTimer?.invalidate()
         wanderTimer = nil
+        beats.removeAll()
+        beatUntil = nil
+    }
+
+    /// Retire the current beat and set up the next, or walk home if that was the last.
+    private func nextBeat() {
+        if !beats.isEmpty { beats.removeFirst() }
+        guard let beat = beats.first else {
+            beatUntil = nil
+            goHome()
+            return
+        }
+        switch beat {
+        case .walk(let seconds, let speed, _):
+            beatUntil = Date().addingTimeInterval(seconds)
+            beatSpeed = speed
+            view.mood = displayMood
+        case .pause(let seconds):
+            beatUntil = Date().addingTimeInterval(seconds)
+            view.mood = displayMood
+        case .look(let mood, let seconds):
+            beatUntil = Date().addingTimeInterval(seconds)
+            view.mood = mood
+            view.needsDisplay = true
+        case .turn:
+            beatUntil = Date()
+        }
+    }
+
+    /// One outing, picked at random and randomised within itself.
+    ///
+    /// Five shapes, and one of them involves no travel at all — he turns, looks around
+    /// and settles again. That one matters more than it looks: it means "Doug moved"
+    /// stops being a reliable signal that he went somewhere, which is most of what made
+    /// the single fixed routine feel mechanical.
+    private func randomOuting() -> [Beat] {
+        let slow = CGFloat.random(in: 0.7...1.1)
+        let brisk = CGFloat.random(in: 1.6...2.4)
+
+        switch Int.random(in: 0..<5) {
+        case 0:  // an amble out, a think, an amble back
+            return [
+                .walk(seconds: .random(in: 2...4), speed: slow, away: true),
+                .look(.content, seconds: .random(in: 1.5...3)),
+            ]
+        case 1:  // a quick dash and straight back
+            return [
+                .walk(seconds: .random(in: 0.8...1.6), speed: brisk, away: true),
+                .pause(seconds: .random(in: 0.3...0.8)),
+            ]
+        case 2:  // never leaves the corner — turns, looks, settles
+            return [
+                .turn,
+                .look(.watch, seconds: .random(in: 1...2.5)),
+                .turn,
+                .pause(seconds: .random(in: 0.5...1.5)),
+            ]
+        case 3:  // out in two stages, with a stop between
+            return [
+                .walk(seconds: .random(in: 1...2), speed: slow, away: true),
+                .pause(seconds: .random(in: 0.6...1.4)),
+                .walk(seconds: .random(in: 1...2.5), speed: slow, away: true),
+                .look(.content, seconds: .random(in: 1...2)),
+            ]
+        default:  // a wander out, a long look back the way he came
+            return [
+                .walk(seconds: .random(in: 1.5...3), speed: brisk, away: true),
+                .turn,
+                .look(.watch, seconds: .random(in: 2...4)),
+            ]
+        }
     }
 
     private func clack() {
@@ -534,7 +655,6 @@ final class DougWindow {
         isDragging = true
         // A wander or a walk home would fight the hand holding him.
         homeTarget = nil
-        walkUntil = nil
         stopWandering()
         stopFrameTimer()
         var origin = panel.frame.origin

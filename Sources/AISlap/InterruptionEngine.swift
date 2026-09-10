@@ -129,7 +129,7 @@ final class InterruptionEngine {
     private let browserBundleIDs: Set<String>
 
     private var lastAIContextAt: Date?
-    private var pendingTimer: Timer?
+    private var pendingTimers: [Timer] = []
     private var pendingEventIDs: [String: Int64] = [:]
 
     /// The window each pending nudge was about. Captured when the nudge fires, not
@@ -185,8 +185,7 @@ final class InterruptionEngine {
     /// Called on every context change. Schedules an evaluation for the moment this
     /// context would become interesting, rather than polling.
     func contextBegan(_ context: WindowContext, at start: Date) {
-        pendingTimer?.invalidate()
-        pendingTimer = nil
+        contextEnded()
 
         if isAIContext(context) {
             // docs/02: any AI surface opens a grace window and clears the
@@ -201,21 +200,52 @@ final class InterruptionEngine {
         }
 
         guard isEnabled else { return }
-        guard let candidate = bestRule(for: context) else { return }
 
-        let threshold = personalizer.dwellThreshold(for: candidate.rule).seconds
-        let fireAt = start.addingTimeInterval(threshold)
-        let delay = max(fireAt.timeIntervalSinceNow, 0.5)
+        for candidate in armedRules(for: context) {
+            let threshold = personalizer.dwellThreshold(for: candidate.rule).seconds
+            let fireAt = start.addingTimeInterval(threshold)
+            let delay = max(fireAt.timeIntervalSinceNow, 0.5)
 
-        pendingTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) {
-            [weak self] _ in
-            self?.evaluate(candidate, context: context, contextStart: start)
+            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) {
+                [weak self] _ in
+                self?.evaluate(candidate, context: context, contextStart: start)
+            }
+            pendingTimers.append(timer)
         }
     }
 
     func contextEnded() {
-        pendingTimer?.invalidate()
-        pendingTimer = nil
+        pendingTimers.forEach { $0.invalidate() }
+        pendingTimers.removeAll()
+    }
+
+    /// Every rule that gets a clock on this context — normally one, sometimes two.
+    ///
+    /// One is the historical behaviour: the highest-confidence rule claiming the
+    /// context wins, and the rest stay quiet so a single moment produces a single
+    /// nudge.
+    ///
+    /// The exception is a rule keyed on *returns* rather than duration. Those measure
+    /// something a dwell rule structurally cannot see, and by confidence alone they are
+    /// shadowed precisely where they matter most: `email.message.dwell` claims every
+    /// email at 0.80 confidence and then never fires, because a week of Chen's log has a
+    /// longest single sit of 81 seconds against its 90-second bar. The dwell rule wins
+    /// the context and produces nothing, forever, and the returns rule never gets asked.
+    ///
+    /// So a returns rule is armed alongside rather than instead. Both still pass through
+    /// every gate, the cooldowns and the daily budget still bind, and the
+    /// already-nudged-about-this set still stops the two of them doubling up on one
+    /// surface.
+    private func armedRules(for context: WindowContext) -> [CompiledRule] {
+        var armed: [CompiledRule] = []
+        if let best = bestRule(for: context) { armed.append(best) }
+
+        if let returns = rules.first(where: {
+            $0.rule.enabled && $0.rule.condition.returnCount != nil && $0.matches(context)
+        }), !armed.contains(where: { $0.id == returns.id }) {
+            armed.append(returns)
+        }
+        return armed
     }
 
     /// Highest-confidence rule claiming this context — or, if none do, the
@@ -336,6 +366,22 @@ final class InterruptionEngine {
             }
         }
 
+        if let needed = rule.condition.returnCount,
+           let window = rule.condition.returnWithinMs {
+            guard let surface = context.surfaceKey else {
+                return .blocked("no surface to count returns to")
+            }
+            let ceiling = (rule.condition.returnShorterThanMs ?? 120_000) / 1000
+            let visits = store.visitCount(
+                surface: surface, withinLast: window / 1000, upTo: ceiling
+            )
+            guard visits >= needed else {
+                return .blocked(
+                    "back to \(surface) \(visits)× in \(short(window / 1000)), needs \(needed)"
+                )
+            }
+        }
+
         if let needed = rule.condition.repeatCount,
            let window = rule.condition.repeatWithinMs {
             let seen = store.sessionCount(
@@ -439,12 +485,21 @@ final class InterruptionEngine {
 
         if style == .panel, let onPresentPanel {
             var copy = rule.nudge.copy
+            // Naming the surface here is safe: the panel is local and the string never
+            // leaves the device. docs/05 forbids putting it in the *prompt*, which does
+            // get transmitted, and that stays generic.
             if rule.condition.accumulatedTodayMs != nil, let surface = context.surfaceKey {
                 let minutes = Int(store.accumulatedSecondsToday(surface: surface) / 60)
-                // Naming the surface here is safe: the panel is local and the string
-                // never leaves the device. docs/05 forbids putting it in the *prompt*,
-                // which does get transmitted, and that stays generic.
                 copy = "\(surface) has eaten \(minutes) minutes today."
+            } else if let window = rule.condition.returnWithinMs,
+                      let surface = context.surfaceKey {
+                // The count is the whole argument here — "you keep coming back" is a
+                // claim, and a number is the difference between a claim and a receipt.
+                let ceiling = (rule.condition.returnShorterThanMs ?? 120_000) / 1000
+                let visits = store.visitCount(
+                    surface: surface, withinLast: window / 1000, upTo: ceiling
+                )
+                copy = "That's \(visits) trips back to \(surface). Hand it over instead?"
             }
             onPresentPanel(copy, rule.nudge.promptTemplate, eventID, rule.id)
             onFire?()

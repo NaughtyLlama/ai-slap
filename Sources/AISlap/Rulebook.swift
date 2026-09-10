@@ -85,6 +85,16 @@ struct Rulebook: Decodable {
             /// unbroken sit. Dwell finds lingering; this finds accumulation, and they
             /// are different kinds of work.
             var accumulatedTodayMs: Double?
+            /// How many separate returns to the *same surface*, inside
+            /// `returnWithinMs`, and each one shorter than `returnShorterThanMs`.
+            ///
+            /// Distinct from `repeatCount`, which counts sessions in a *category*
+            /// anywhere. This is about coming back to one place, briefly, over and over
+            /// — the pattern a dwell threshold is structurally unable to see, because
+            /// every individual visit is far below it.
+            var returnCount: Int?
+            var returnWithinMs: Double?
+            var returnShorterThanMs: Double?
         }
 
         struct Nudge: Decodable {

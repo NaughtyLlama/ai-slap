@@ -314,6 +314,27 @@
       }
     },
     {
+      "id": "surface.returns",
+      "enabled": true,
+      "category": "returns",
+      "match": {
+        "matchesAnything": true
+      },
+      "condition": {
+        "dwellMs": 20000,
+        "noAiContextForMs": 600000,
+        "returnCount": 12,
+        "returnWithinMs": 5400000,
+        "returnShorterThanMs": 120000
+      },
+      "confidence": 0.6,
+      "cooldownMs": 10800000,
+      "nudge": {
+        "copy": "You keep going back to this one. Hand it over instead?",
+        "promptTemplate": "I keep coming back to this same task in short bursts. Help me do it in one pass, or automate it."
+      }
+    },
+    {
       "id": "surface.grind",
       "enabled": true,
       "category": "grind",

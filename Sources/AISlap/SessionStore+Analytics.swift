@@ -64,6 +64,45 @@ extension SessionStore {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
+    /// How many separate times a surface has been come back to inside a window.
+    ///
+    /// This is the counterpart to `accumulatedSecondsToday`, and the difference is the
+    /// point. Dwell finds a long sit. Accumulation finds a day quietly eaten. **This
+    /// finds the shape neither of those can see: a surface touched over and over,
+    /// briefly, all day.** Chen's own log is the case for it — 103 visits to chat
+    /// threads in a week averaging 52 seconds each, against a dwell rule needing 120
+    /// seconds in one go that fired five times.
+    ///
+    /// Glances are excluded on the same reasoning as everywhere else: a tab that steals
+    /// focus for two seconds is not a return, and one that did so 249 times in a week
+    /// would otherwise trip this rule constantly. Long sits are excluded at the other
+    /// end — those are what dwell rules are for, and counting them here would make two
+    /// rules fight over the same moment.
+    func visitCount(
+        surface: String, withinLast interval: TimeInterval, upTo maximumDwell: TimeInterval
+    ) -> Int {
+        let cutoff = Date().addingTimeInterval(-interval).timeIntervalSince1970
+        let sql = """
+            SELECT COUNT(*) FROM sessions
+            WHERE started_at >= ?
+              AND dwell_seconds >= \(Self.glanceThreshold)
+              AND dwell_seconds <= ?
+              AND window_title IS NOT NULL
+              AND (window_title = ? OR window_title LIKE ? || ' - %');
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, cutoff)
+        sqlite3_bind_double(statement, 2, maximumDwell)
+        sqlite3_bind_text(statement, 3, surface, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 4, surface, -1, sqliteTransient)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(statement, 0))
+    }
+
     // MARK: - Interruption outcomes
 
     enum Outcome: String {
@@ -71,6 +110,15 @@ extension SessionStore {
         case accepted
         case alreadyDid = "already_did"
         case dismissed
+        /// Appeared, was never answered, timed out.
+        ///
+        /// This used to be written as `dismissed`, and that conflation is the single
+        /// most expensive bug found in this product so far. "No" and "I was mid-sentence
+        /// and never looked up" are different facts, and recording them identically
+        /// means the trust multiplier learns rejection from silence — which is how a
+        /// person who never actually said no to anything ends up with every rule
+        /// throttled below the firing threshold.
+        case ignored
         case snoozed
         case muted
     }
@@ -112,11 +160,17 @@ extension SessionStore {
         var accepted = 0
         var alreadyDid = 0
         var dismissed = 0
+        var ignored = 0
         var snoozed = 0
 
-        /// Everything that resolved one way or the other. Interruptions still awaiting
-        /// a response are excluded so an ignored notification doesn't read as a
-        /// rejection the moment it appears.
+        /// Everything the user actually answered.
+        ///
+        /// `ignored` is deliberately **not** in here. An unanswered panel is evidence
+        /// about the moment — you were busy — far more than it is evidence about the
+        /// rule, and letting it into the posterior means a rule can be throttled to
+        /// nothing by a person who never once said no. It still feeds the backoff, at
+        /// half the weight of a real refusal, so a rule nobody ever engages with does
+        /// eventually go quiet.
         var resolved: Int { accepted + alreadyDid + dismissed + snoozed }
 
         /// `already_did` counts as a win: the user did use AI, we just couldn't see it
@@ -151,6 +205,7 @@ extension SessionStore {
             case .accepted:   tally.accepted += count
             case .alreadyDid: tally.alreadyDid += count
             case .dismissed:  tally.dismissed += count
+            case .ignored:    tally.ignored += count
             case .snoozed:    tally.snoozed += count
             default:          break
             }
@@ -211,6 +266,7 @@ extension SessionStore {
             case .accepted:   tally.accepted += count
             case .alreadyDid: tally.alreadyDid += count
             case .dismissed:  tally.dismissed += count
+            case .ignored:    tally.ignored += count
             case .snoozed:    tally.snoozed += count
             default:          break
             }
