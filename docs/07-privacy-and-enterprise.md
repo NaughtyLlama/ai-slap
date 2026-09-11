@@ -15,8 +15,15 @@ State this publicly, in plain language, and hold to it:
    straight to your clipboard and your AI tool, and are never transmitted to us or stored.
 3. **What syncs is counters.** "Rule 14 fired, you accepted." No titles, no URLs, no app
    names beyond a coarse category, no content.
-4. **Your local history is yours.** 30-day default retention, a viewer that shows
-   everything stored, one-click wipe, configurable retention.
+4. **Your local history is yours.** Kept until you delete it, a viewer that shows
+   everything stored, one-click wipe, optional retention limits.
+
+   *Changed 2026-09-10, and the change was the user's:* the default was a rolling
+   30-day window. Chen asked for long-term history instead, because the value of a
+   usage record is the shape it takes over months — and a product that quietly
+   destroys your own data on a timer is making that decision for you. Shortening
+   retention is now an opt-in with a confirmation, since picking 30 days deletes
+   everything older the moment you pick it.
 5. **Pause means paused.** The menu-bar pause stops collection, not just interruptions.
 
 Point 5 deserves emphasis: a pause button that keeps collecting is the kind of detail
@@ -32,11 +39,33 @@ permissions, containing:
 | Category tokens (`gmail.message.open`) | Raw window titles |
 | Dwell durations | URLs or paths |
 | Rule IDs, outcomes, timestamps | Screenshots |
-| Goose mood state, streaks | Keystrokes or clipboard |
+| App name and bundle id | Keystrokes or clipboard |
+| Doug's mood state, streaks | Title-derived daily totals |
 
-Rolling 30-day window, pruned on launch. The **data viewer** is a real product surface,
-not a compliance checkbox — a plain table of everything held, exportable as CSV, with a
-delete button. Users who inspect it become the people who vouch for you.
+That last cell is the subtle one. Some rules need to know how long you have spent on a
+surface today, and a surface is derived from the window title — so the total is derived
+from something that may not be written down. It lives in memory, it is exact while the
+app runs, and it is gone when the app quits. A number that could reconstruct what the
+title said does not get a row in a database.
+
+Kept until deleted, with 30/90/365-day limits available. Pruning runs at most hourly
+rather than only on launch, because an app that stays open for a fortnight otherwise
+never enforces the limit its owner chose.
+
+The **data viewer** is a real product surface, not a compliance checkbox — a plain
+summary of everything held, exportable as CSV, with a delete button. Users who inspect
+it become the people who vouch for you.
+
+**Delete means delete.** The erase path clears sessions, outcomes, learned adjustments,
+muted rules, the merge cache, in-memory totals and any export the app wrote, then
+`VACUUM`s the file so freed pages carrying old text are actually overwritten. Exports
+you copied somewhere else are yours and are not touched — the alert says so, because a
+delete button that silently misses something is worse than one that admits its edges.
+
+**Migration is one-way and it is the point.** A database written by an earlier build
+still carries raw titles in columns that no longer exist. Opening it rebuilds the table
+without them and preserves every other historical row, so upgrading destroys the titles
+and keeps the history.
 
 ## Admin reporting: aggregate only
 

@@ -54,6 +54,16 @@ Templates are plain text with no interpolated content from the screen. The windo
 *not* injected — it's already been reduced to a category token and discarded, and injecting
 it would leak exactly the content [02](02-detection-architecture.md) is careful not to keep.
 
+### 3b. Show the capture to its owner first
+
+*Added 2026-09-10.* A screenshot is shown locally, at a readable size, before anything
+is staged or opened. Include it, send text only, or cancel.
+
+This was not in the original six steps and it should have been. The whole product asks
+for a permission that lets it photograph a window, and the only thing that makes that
+bearable is seeing the photograph before it leaves. It also turns the screenshot
+permission from a modal you meet in the dark into a choice attached to a picture.
+
 ### 4. Stage the pasteboard
 
 Image + prompt text onto `NSPasteboard.general`.
@@ -62,10 +72,33 @@ Image + prompt text onto `NSPasteboard.general`.
 clipboard is a small betrayal that people notice and resent. Snapshot before, restore
 ~2 seconds after the paste.
 
+**Only ever restore a clipboard you still own.** The snapshot is taken before the
+destination opens, and a cold launch is seconds long — long enough for the user to copy
+something of their own. Restoring blindly would overwrite it, which is the same betrayal
+committed at the other end. Every write and every restore checks the change count first,
+and a payload that lost the race is offered as an explicit copy button instead.
+
 ### 5. Open the destination and paste
 
-Open the target, wait for it to become frontmost (poll `frontmostApplication`, ~2s timeout),
-then synthesize ⌘V via `CGEvent` — which works because Accessibility is already granted.
+Open the target and wait for **that process** to become frontmost, not for any app to be.
+`NSWorkspace` reports the pid it actually launched, including the user's real default
+browser rather than whatever was in front when the URL opened, and every synthesised
+event is posted to that pid.
+
+Then check, immediately before each payload: still trusted for Accessibility, still that
+pid in front, still own the clipboard, still an editable field focused. A handoff is
+several seconds of waiting and the user is free to move during them; a ⌘V aimed at a
+window that is no longer there types into whatever replaced it.
+
+**A web fallback never receives synthesised keystrokes.** A browser being frontmost says
+nothing about whether the page has loaded, the user is logged in, or the composer has
+focus — and the destination's new-chat shortcut means something else entirely in a
+browser. Web handoffs open the page, keep the payload, and ask for an explicit ⌘V.
+
+**Posting a paste event is not proof of delivery.** The status the app reports is
+"paste requested", and the recovery panel with both payloads stays available for five
+minutes afterwards. Reporting a confirmed paste it cannot confirm is how a product
+teaches people not to trust its other claims.
 
 ### 6. Never auto-submit
 
@@ -122,11 +155,14 @@ arrive via the pasteboard, which is why step 5 exists at all.
 
 | Failure | Behavior |
 |---|---|
-| Screen Recording denied | Text-only handoff, explain once, don't re-prompt |
-| Destination app not installed | Fall back to web adapter |
+| Screen Recording denied | Text-only handoff, offer the permission in the review, don't nag |
+| Destination app not installed | Fall back to web adapter, explicit paste |
+| Destination won't open at all | Clipboard plus recovery panel, screenshot included |
 | Target never comes frontmost | Leave content on clipboard, tell the user to paste |
+| Focus, trust or clipboard changes mid-flight | Stop before the next event, offer manual paste |
 | Paste synthesis fails | Same — clipboard is the fallback that always works |
-| Capture times out | Abort silently, no error modal |
+| Capture times out, or the window is ambiguous | Abort silently, no error modal |
+| User erases or pauses mid-handoff | Cancel; no delayed step may revive the payload |
 
 The clipboard is the universal fallback: **even in total failure the content is one ⌘V
 away**, and the user is never left with a broken interaction and no recourse.
