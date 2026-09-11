@@ -532,10 +532,14 @@ final class InterruptionEngine {
             personalizer.setUserMuted(ruleID, muted: true)
         }
         if outcome == .accepted { runHandoff(for: eventID) }
+        else { pendingTargets.removeValue(forKey: eventID) }
         if outcome == .alreadyDid { lastAIContextAt = Date() }
     }
 
     func handleResponse(actionIdentifier: String, eventID: Int64, ruleID: String) {
+        if actionIdentifier != Self.actionAccept && actionIdentifier != UNNotificationDefaultActionIdentifier {
+            pendingTargets.removeValue(forKey: eventID)
+        }
         switch actionIdentifier {
         case Self.actionAccept, UNNotificationDefaultActionIdentifier:
             store.updateOutcome(eventID: eventID, to: .accepted)
@@ -558,7 +562,11 @@ final class InterruptionEngine {
     var onHandoffResult: ((Handoff.Result) -> Void)?
 
     private func runHandoff(for eventID: Int64) {
-        guard let target = pendingTargets.removeValue(forKey: eventID) else { return }
+        guard let target = pendingTargets.removeValue(forKey: eventID),
+              Date().timeIntervalSince(target.createdAt) < 300 else {
+            onHandoffResult?(.failed("This handoff expired. Use ⌥Space on the window you want to share."))
+            return
+        }
         handoff.run(target) { [weak self] result in
             self?.onHandoffResult?(result)
         }
@@ -604,6 +612,23 @@ final class InterruptionEngine {
 
     func setUserMuted(_ ruleID: String, muted: Bool) {
         personalizer.setUserMuted(ruleID, muted: muted)
+    }
+
+    func expireTargets() {
+        let cutoff = Date().addingTimeInterval(-300)
+        pendingTargets = pendingTargets.filter { $0.value.createdAt > cutoff }
+    }
+
+    func resetHistory() {
+        contextEnded()
+        pendingTargets.removeAll()
+        pendingEventIDs.removeAll()
+        interruptedSignatures.removeAll()
+        lastAIContextAt = nil
+        personalizer.resetHistoryPreferences()
+        handoff.cancel()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
 
     func resolveStaleEvents() {

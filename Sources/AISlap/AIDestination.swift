@@ -30,32 +30,33 @@ struct AIDestination: Decodable {
     var isAvailable: Bool { isNativeAvailable || webURL != nil }
 
     struct Opened {
+        let pid: pid_t
         let bundleID: String
-        /// Whether the app was already running. A cold launch needs far longer to
-        /// reach a state where a keystroke means anything, and guessing one timeout
-        /// for both cases is how the paste got dropped.
         let wasAlreadyRunning: Bool
+        let isWeb: Bool
     }
 
-    /// Opens the destination and reports what to wait for before pasting.
-    func open() -> Opened? {
-        if let bundleId,
-           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
-        {
-            let wasRunning = !NSRunningApplication
-                .runningApplications(withBundleIdentifier: bundleId).isEmpty
-
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-            return Opened(bundleID: bundleId, wasAlreadyRunning: wasRunning)
-        }
-
-        // docs/05: destination app not installed → fall back to the web adapter.
-        guard let webURL, let url = URL(string: webURL) else { return nil }
-        let browserBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        NSWorkspace.shared.open(url)
-        guard let browserBefore else { return nil }
-        return Opened(bundleID: browserBefore, wasAlreadyRunning: true)
+    /// Opening completion supplies the actual destination process, including the
+    /// user's default URL handler. Web routes never use native keyboard shortcuts.
+    @MainActor
+    func open() async -> Opened? {
+        let workspace = NSWorkspace.shared
+        let nativeURL = bundleId.flatMap { workspace.urlForApplication(withBundleIdentifier: $0) }
+        let pageURL = webURL.flatMap(URL.init(string:))
+        guard let appURL = nativeURL ?? pageURL.flatMap({ workspace.urlForApplication(toOpen: $0) }),
+              let actualBundleID = Bundle(url: appURL)?.bundleIdentifier else { return nil }
+        let running = !NSRunningApplication.runningApplications(withBundleIdentifier: actualBundleID).isEmpty
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        do {
+            let app: NSRunningApplication
+            if nativeURL != nil {
+                app = try await workspace.openApplication(at: appURL, configuration: configuration)
+            } else if let pageURL {
+                app = try await workspace.open([pageURL], withApplicationAt: appURL, configuration: configuration)
+            } else { return nil }
+            return Opened(pid: app.processIdentifier, bundleID: actualBundleID,
+                          wasAlreadyRunning: running, isWeb: nativeURL == nil)
+        } catch { return nil }
     }
 }

@@ -5,16 +5,8 @@ private let SQLITE_TRANSIENT = unsafeBitCast(
     -1, to: sqlite3_destructor_type.self
 )
 
-/// Local-only log of observed contexts.
-///
-/// ⚠️ Phase 0 stores **raw window titles on disk**. Shipping builds must not — see
-/// docs/02, "Title handling": a title is reduced to a category token within the tick
-/// and the raw string discarded. The spike is the deliberate exception, because the
-/// whole point of Phase 0 is hand-labelling real titles to measure rule precision.
-/// This file is where that exception lives; delete it, don't extend it, when the
-/// rules engine lands.
-///
-/// Nothing here talks to the network. There is no network code in this target at all.
+/// Category/duration history only. Window titles are used in memory, never stored.
+/// Existing Phase 0 logs are migrated in place and the app-managed raw CSV removed.
 final class SessionStore {
 
     /// Contexts shorter than this are flicker — alt-tabbing through windows, a
@@ -30,8 +22,17 @@ final class SessionStore {
     var db: OpaquePointer?
     let databaseURL: URL
 
-    init() throws {
-        let support = try FileManager.default.url(
+    /// Zero keeps category/duration history until the user deletes it.
+    var retentionDays: Int
+    private let now: () -> Date
+    private var lastPrunedAt: Date?
+    private var surfaceDay: Date?
+    private var surfaceSeconds: [String: TimeInterval] = [:]
+
+    init(directory: URL? = nil, retentionDays: Int = 0, now: @escaping () -> Date = Date.init) throws {
+        self.retentionDays = retentionDays
+        self.now = now
+        let support = try directory ?? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
@@ -53,6 +54,7 @@ final class SessionStore {
         }
 
         try execute("PRAGMA journal_mode = WAL;")
+        try execute("PRAGMA secure_delete = ON;")
         try execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,8 +63,8 @@ final class SessionStore {
                 dwell_seconds REAL NOT NULL,
                 bundle_id     TEXT NOT NULL,
                 app_name      TEXT NOT NULL,
-                window_title  TEXT,
-                label         TEXT
+                has_title     INTEGER NOT NULL DEFAULT 0,
+                category      TEXT
             );
             """)
         try execute("""
@@ -70,11 +72,35 @@ final class SessionStore {
                 ON sessions(started_at);
             """)
 
-        // Added with the rules engine. Existing spike databases predate it, so this
-        // is additive and failure here is not fatal.
-        if !columnExists(table: "sessions", column: "category") {
-            try? execute("ALTER TABLE sessions ADD COLUMN category TEXT;")
+        if columnExists(table: "sessions", column: "window_title") {
+            let category = columnExists(table: "sessions", column: "category") ? "category" : "NULL"
+            try execute("BEGIN IMMEDIATE;")
+            do {
+                try execute("""
+                    CREATE TABLE sessions_private (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        started_at REAL NOT NULL, ended_at REAL NOT NULL,
+                        dwell_seconds REAL NOT NULL, bundle_id TEXT NOT NULL,
+                        app_name TEXT NOT NULL, has_title INTEGER NOT NULL DEFAULT 0,
+                        category TEXT
+                    );
+                    INSERT INTO sessions_private
+                        SELECT id, started_at, ended_at, dwell_seconds, bundle_id,
+                               app_name, window_title IS NOT NULL, \(category) FROM sessions;
+                    DROP TABLE sessions;
+                    ALTER TABLE sessions_private RENAME TO sessions;
+                    CREATE INDEX sessions_started_at ON sessions(started_at);
+                    COMMIT;
+                    """)
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+            try execute("VACUUM;")
+            try checkpoint()
         }
+        // Retry cleanup on every launch, including after an interrupted migration.
+        try removeExport(named: "phase0-export.csv")
 
         // One row per interruption. `outcome` starts as "fired" and is updated when
         // the user responds, so acceptance is accepted ÷ fired by construction —
@@ -92,6 +118,7 @@ final class SessionStore {
         try execute("""
             CREATE INDEX IF NOT EXISTS rule_events_rule ON rule_events(rule_id, at);
             """)
+        try pruneHistory()
     }
 
     private func columnExists(table: String, column: String) -> Bool {
@@ -136,16 +163,21 @@ final class SessionStore {
 
     @discardableResult
     func record(_ session: Session, category: String?) throws -> RecordOutcome {
+        try pruneIfNeeded()
+        guard retentionDays == 0 || session.endedAt >= now().addingTimeInterval(-Double(retentionDays) * 86400)
+        else { return .dropped }
         // A return to the context we just left, with only a flicker in between.
         if var last = lastWrite,
            last.context == session.context,
+           session.startedAt >= last.endedAt,
            session.startedAt.timeIntervalSince(last.endedAt) <= Self.mergeWindow
         {
             last.endedAt = session.endedAt
-            lastWrite = last
             try extendRow(
                 id: last.rowID, startedAt: last.startedAt, endedAt: last.endedAt
             )
+            lastWrite = last
+            accumulate(session, category: category)
             return .merged
         }
 
@@ -154,7 +186,7 @@ final class SessionStore {
         let sql = """
             INSERT INTO sessions
                 (started_at, ended_at, dwell_seconds, bundle_id, app_name,
-                 window_title, category)
+                 has_title, category)
             VALUES (?, ?, ?, ?, ?, ?, ?);
             """
         var statement: OpaquePointer?
@@ -168,11 +200,7 @@ final class SessionStore {
         sqlite3_bind_double(statement, 3, session.dwell)
         bindText(statement, 4, session.context.bundleID)
         bindText(statement, 5, session.context.appName)
-        if let title = session.context.title {
-            bindText(statement, 6, title)
-        } else {
-            sqlite3_bind_null(statement, 6)
-        }
+        sqlite3_bind_int(statement, 6, session.context.title == nil ? 0 : 1)
         if let category {
             bindText(statement, 7, category)
         } else {
@@ -189,6 +217,7 @@ final class SessionStore {
             startedAt: session.startedAt,
             endedAt: session.endedAt
         )
+        accumulate(session, category: category)
         return .inserted
     }
 
@@ -231,7 +260,7 @@ final class SessionStore {
             .timeIntervalSince1970
         let sql = """
             SELECT COUNT(*),
-                   SUM(CASE WHEN window_title IS NOT NULL THEN 1 ELSE 0 END),
+                   SUM(has_title),
                    SUM(dwell_seconds)
             FROM sessions WHERE started_at >= ?;
             """
@@ -251,21 +280,21 @@ final class SessionStore {
         return stats
     }
 
-    /// Writes a CSV alongside the database, ready for hand-labelling in a spreadsheet.
+    /// Exports category/duration history only; no titles or free-form labels.
     func exportCSV() throws -> URL {
+        try pruneHistory()
         let url = databaseURL
             .deletingLastPathComponent()
-            .appendingPathComponent("phase0-export.csv")
+            .appendingPathComponent("activity-export.csv")
 
         // Fold the write-ahead log into the database file first. Without this the
         // .sqlite is a near-empty shell and the data lives in a sibling -wal file —
         // copy the database alone and you appear to have lost everything.
         sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
 
-        var csv = "started_at,dwell_seconds,bundle_id,app_name,category,window_title,label\n"
+        var csv = "started_at,dwell_seconds,bundle_id,app_name,category\n"
         let sql = """
-            SELECT started_at, dwell_seconds, bundle_id, app_name, category,
-                   window_title, label
+            SELECT started_at, dwell_seconds, bundle_id, app_name, category
             FROM sessions ORDER BY started_at;
             """
         var statement: OpaquePointer?
@@ -284,8 +313,6 @@ final class SessionStore {
                 columnText(statement, 2) ?? "",
                 columnText(statement, 3) ?? "",
                 columnText(statement, 4) ?? "",
-                columnText(statement, 5) ?? "",
-                columnText(statement, 6) ?? "",
             ]
             csv += fields.map(csvEscaped).joined(separator: ",") + "\n"
         }
@@ -295,8 +322,82 @@ final class SessionStore {
     }
 
     func deleteAll() throws {
-        try execute("DELETE FROM sessions;")
+        try execute("BEGIN IMMEDIATE;")
+        do {
+            try execute("DELETE FROM sessions; DELETE FROM rule_events; COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        // Clear caches even if filesystem cleanup fails after the SQL commits.
+        lastWrite = nil
+        surfaceSeconds.removeAll()
+        surfaceDay = nil
+        try removeExport(named: "phase0-export.csv")
+        try removeExport(named: "activity-export.csv")
         try execute("VACUUM;")
+        try checkpoint()
+    }
+
+    func pruneIfNeeded() throws {
+        if let lastPrunedAt, now().timeIntervalSince(lastPrunedAt) < 3600 { return }
+        try pruneHistory()
+    }
+
+    func pruneHistory() throws {
+        guard retentionDays > 0 else { lastPrunedAt = now(); return }
+        let cutoff = now().addingTimeInterval(-Double(retentionDays) * 86400)
+            .timeIntervalSince1970
+        try execute("BEGIN IMMEDIATE;")
+        let before = sqlite3_total_changes(db)
+        do {
+            try execute("DELETE FROM sessions WHERE ended_at < \(cutoff);")
+            try execute("DELETE FROM rule_events WHERE at < \(cutoff); COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        if sqlite3_total_changes(db) > before {
+            lastWrite = nil
+            // App-managed exports may contain rows that just expired.
+            try removeExport(named: "activity-export.csv")
+            try checkpoint()
+        }
+        lastPrunedAt = now()
+    }
+
+    private func removeExport(named name: String) throws {
+        let url = databaseURL.deletingLastPathComponent().appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func checkpoint() throws {
+        guard sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil) == SQLITE_OK
+        else { throw StoreError.write(message: lastErrorMessage) }
+    }
+
+    /// Title-derived daily totals never leave memory and restart when the app quits.
+    private func resetSurfaceDayIfNeeded() {
+        let day = Calendar.current.startOfDay(for: now())
+        if surfaceDay != day {
+            surfaceSeconds.removeAll()
+            surfaceDay = day
+        }
+    }
+
+    private func accumulate(_ session: Session, category: String?) {
+        resetSurfaceDayIfNeeded()
+        guard category == nil, let surface = session.context.surfaceKey,
+              let day = surfaceDay else { return }
+        let seconds = max(0, min(session.endedAt, now()).timeIntervalSince(max(session.startedAt, day)))
+        surfaceSeconds[surface, default: 0] += seconds
+    }
+
+    func accumulatedSecondsToday(surface: String) -> TimeInterval {
+        resetSurfaceDayIfNeeded()
+        return surfaceSeconds[surface, default: 0]
     }
 
     // MARK: - Plumbing
@@ -334,7 +435,8 @@ final class SessionStore {
         return String(cString: cString)
     }
 
-    private func csvEscaped(_ value: String) -> String {
+    private func csvEscaped(_ raw: String) -> String {
+        let value = raw.first.map { "=+-@\t\r".contains($0) } == true ? "'" + raw : raw
         guard value.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else {
             return value
         }
