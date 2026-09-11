@@ -291,31 +291,6 @@ extension SessionStore {
         return Int(sqlite3_changes(db))
     }
 
-    /// Seconds spent today in one unrecognised browser surface, keyed on the leading
-    /// segment of the window title — "Termly - Part of group…" and "Termly - Google
-    /// Chrome" are the same surface. Feeds the accumulation rule.
-    func accumulatedSecondsToday(surface: String) -> TimeInterval {
-        let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
-        let sql = """
-            SELECT SUM(dwell_seconds) FROM sessions
-            WHERE category IS NULL AND started_at >= ?
-              AND window_title IS NOT NULL
-              AND (window_title = ? OR window_title LIKE ? || ' - %');
-            """
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_finalize(statement) }
-
-        sqlite3_bind_double(statement, 1, startOfDay)
-        sqlite3_bind_text(statement, 2, surface, -1, sqliteTransient)
-        sqlite3_bind_text(statement, 3, surface, -1, sqliteTransient)
-
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              sqlite3_column_type(statement, 0) != SQLITE_NULL
-        else { return 0 }
-        return sqlite3_column_double(statement, 0)
-    }
-
     func firedToday() -> Int {
         let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
         let sql = "SELECT COUNT(*) FROM rule_events WHERE at >= ?;"

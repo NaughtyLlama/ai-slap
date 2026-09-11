@@ -1,133 +1,127 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 
-/// Stages the handoff payload, then puts the user's clipboard back.
-///
-/// docs/05 is emphatic about the restore: silently destroying someone's clipboard is a
-/// small betrayal that people notice and resent — especially from an app that already
-/// watches what they do.
+/// A clipboard transaction may write/restore only while it still owns the clipboard.
+/// A newer copy or handoff always wins. Tests use a private named pasteboard.
 enum Pasteboard {
+    static let restoreDelay: TimeInterval = 1
+    private static var generations: [NSPasteboard.Name: UUID] = [:]
 
-    /// How long to wait after the last paste before putting the old clipboard back.
-    static let restoreDelay: TimeInterval = 1.0
+    final class Staged {
+        private let board: NSPasteboard
+        private let saved: [[NSPasteboard.PasteboardType: Data]]
+        private let generation = UUID()
+        private var expectedChangeCount: Int
 
-    /// The user's clipboard, held so it can be given back.
-    ///
-    /// The restore is deliberately **not** on a timer from staging. It used to be, and
-    /// that raced the paste: whenever the destination took longer than the timer to be
-    /// ready, the payload was pulled out from under it, so the paste landed on nothing
-    /// *and* the clipboard fallback was gone too.
-    struct Staged {
-        fileprivate let saved: Snapshot
-
-        func restoreAfterPaste() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-                restore(saved, to: .general)
+        init(board: NSPasteboard) {
+            self.board = board
+            saved = (board.pasteboardItems ?? []).map { item in
+                var values: [NSPasteboard.PasteboardType: Data] = [:]
+                for type in item.types { values[type] = item.data(forType: type) }
+                return values
             }
+            expectedChangeCount = board.changeCount
+            generations[board.name] = generation
         }
 
-        /// Leaves the payload in place. Used on every failure path: docs/05 makes the
-        /// clipboard the universal fallback, which only works if it is still there.
-        func keepPayload() {}
-    }
+        var ownsClipboard: Bool {
+            generations[board.name] == generation && board.changeCount == expectedChangeCount
+        }
 
-    static func beginStaging() -> Staged {
-        Staged(saved: snapshot(.general))
-    }
+        @discardableResult
+        func put(text: String) -> Bool {
+            guard ownsClipboard else { return false }
+            board.clearContents()
+            let success = board.setString(text, forType: .string)
+            expectedChangeCount = board.changeCount
+            return success
+        }
 
-    /// Text and image go on the pasteboard **separately, and are pasted separately**.
-    ///
-    /// Writing both as one pasteboard write produces two items, and chat composers
-    /// read only the first — which is why the prompt arrived and the screenshot
-    /// silently didn't. Two writes and two Cmd-Vs put both in the composer.
-    static func put(text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-    }
+        @discardableResult
+        func put(image: CGImage) -> Bool {
+            guard ownsClipboard else { return false }
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
+            board.clearContents()
+            let success = board.setData(png, forType: .png)
+            expectedChangeCount = board.changeCount
+            return success
+        }
 
-    static func put(image: CGImage) {
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        bitmap.size = NSSize(width: image.width, height: image.height)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else { return }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setData(png, forType: .png)
-    }
-
-    fileprivate struct Snapshot {
-        let items: [[NSPasteboard.PasteboardType: Data]]
-    }
-
-    private static func snapshot(_ pasteboard: NSPasteboard) -> Snapshot {
-        let items = (pasteboard.pasteboardItems ?? []).map { item in
-            var stored: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) { stored[type] = data }
+        @discardableResult
+        func restoreIfOwned() -> Bool {
+            guard ownsClipboard else { return false }
+            board.clearContents()
+            let restored = saved.map { values -> NSPasteboardItem in
+                let item = NSPasteboardItem()
+                for (type, data) in values { item.setData(data, forType: type) }
+                return item
             }
-            return stored
+            if !restored.isEmpty { board.writeObjects(restored) }
+            generations.removeValue(forKey: board.name)
+            return true
         }
-        return Snapshot(items: items)
-    }
 
-    private static func restore(_ snapshot: Snapshot, to pasteboard: NSPasteboard) {
-        pasteboard.clearContents()
-        guard !snapshot.items.isEmpty else { return }
-
-        let restored = snapshot.items.map { stored -> NSPasteboardItem in
-            let item = NSPasteboardItem()
-            for (type, data) in stored { item.setData(data, forType: type) }
-            return item
+        deinit {
+            if generations[board.name] == generation { generations.removeValue(forKey: board.name) }
         }
-        pasteboard.writeObjects(restored)
     }
 
-    /// Synthesises Cmd-V. Works because Accessibility is already granted — the same
-    /// permission the whole product depends on.
-    @discardableResult
-    static func synthesizePaste() -> Bool {
-        Keyboard.press(keyCode: CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
-    }
+    static func beginStaging(on board: NSPasteboard = .general) -> Staged { Staged(board: board) }
 }
 
 enum Keyboard {
+    /// Revalidate immediately before posting, and address events to the destination
+    /// process so a focus race cannot redirect a paste into an unrelated application.
     @discardableResult
-    static func press(keyCode: CGKeyCode, flags: CGEventFlags) -> Bool {
-        guard let source = CGEventSource(stateID: .combinedSessionState),
-              let down = CGEvent(
-                keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let up = CGEvent(
-                keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+    static func press(keyCode: CGKeyCode, flags: CGEventFlags, pid: pid_t) -> Bool {
+        guard AXIsProcessTrusted(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              let source = CGEventSource(stateID: .combinedSessionState),
+              let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         else { return false }
-
         down.flags = flags
         up.flags = flags
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        down.postToPid(pid)
+        up.postToPid(pid)
         return true
     }
 
-    /// Parses a rulebook shortcut like "cmd+n" or "cmd+shift+o".
+    /// Require an editable text control before sending payloads. Unknown AX layouts
+    /// take the explicit paste fallback instead of guessing at the focused control.
+    static func hasEditableFocus(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+        let element = value as! AXUIElement
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              let role = role as? String,
+              [kAXTextAreaRole, kAXTextFieldRole, kAXComboBoxRole].contains(role) else { return false }
+        var editable = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &editable) == .success
+            && editable.boolValue
+    }
+
     static func parse(_ shortcut: String) -> (CGKeyCode, CGEventFlags)? {
         let parts = shortcut.lowercased().split(separator: "+").map(String.init)
         guard let keyName = parts.last else { return nil }
-
         var flags: CGEventFlags = []
         for modifier in parts.dropLast() {
             switch modifier {
             case "cmd", "command": flags.insert(.maskCommand)
-            case "shift":          flags.insert(.maskShift)
-            case "opt", "option":  flags.insert(.maskAlternate)
+            case "shift": flags.insert(.maskShift)
+            case "opt", "option": flags.insert(.maskAlternate)
             case "ctrl", "control": flags.insert(.maskControl)
             default: return nil
             }
         }
-
-        let keyCodes: [String: Int] = [
-            "n": kVK_ANSI_N, "o": kVK_ANSI_O, "t": kVK_ANSI_T,
-            "k": kVK_ANSI_K, "j": kVK_ANSI_J, "return": kVK_Return,
-        ]
+        // Submission shortcuts are deliberately not supported.
+        let keyCodes: [String: Int] = ["n": kVK_ANSI_N, "o": kVK_ANSI_O, "t": kVK_ANSI_T,
+                                     "k": kVK_ANSI_K, "j": kVK_ANSI_J]
         guard let code = keyCodes[keyName] else { return nil }
         return (CGKeyCode(code), flags)
     }

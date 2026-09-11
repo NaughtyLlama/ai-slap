@@ -1,53 +1,68 @@
 import AppKit
+import ApplicationServices
 
-/// The six steps of docs/05, in order: capture the window, build the prompt, stage the
-/// pasteboard, open the destination, wait for it, paste — and never submit.
-///
-/// The clipboard is the universal fallback. Every failure path below leaves the payload
-/// on it and says so, so the user is never stranded with a broken interaction and no
-/// recourse.
+/// Capture → local review → open → guarded native paste (or explicit web paste).
+/// Every uncertain delivery retains a short-lived, in-memory recovery payload.
 final class Handoff {
-
     struct Target {
         let pid: pid_t
         let title: String?
         let prompt: String
+        let createdAt = Date()
     }
 
     enum Result {
-        case pasted(hadImage: Bool)
+        case pasteRequested(hadImage: Bool)
         case clipboardOnly(reason: String)
         case needsScreenRecording
+        case cancelled
         case failed(String)
 
         var summary: String {
             switch self {
-            case .pasted(let hadImage):
-                return hadImage ? "pasted with screenshot" : "pasted, text only"
-            case .clipboardOnly(let reason):
-                return "clipboard only — \(reason)"
-            case .needsScreenRecording:
-                return "waiting on Screen Recording permission"
-            case .failed(let message):
-                return "failed — \(message)"
+            case .pasteRequested(let image): return image ? "paste requested with screenshot" : "paste requested, text only"
+            case .clipboardOnly(let reason): return "manual paste — \(reason)"
+            case .needsScreenRecording: return "Screen Recording settings opened — try again afterward"
+            case .cancelled: return "cancelled"
+            case .failed(let message): return "failed — \(message)"
             }
         }
     }
 
-    /// How long to wait for the destination to come forward. A cold launch is a
-    /// different order of magnitude from activating an app that is already running,
-    /// and docs/05's single "~2s" is only right for the warm case — the cold one was
-    /// timing out every time and dropping the paste.
-    private let warmTimeout: TimeInterval = 3
-    private let coldTimeout: TimeInterval = 20
+    enum ReviewChoice { case includeImage, textOnly, cancel, permission }
 
-    /// A beat after the app is frontmost, so the composer has focus before the
-    /// keystroke lands. A cold-started app needs noticeably longer to settle.
-    private let warmSettle: TimeInterval = 0.35
-    private let coldSettle: TimeInterval = 1.5
+    /// All external effects are injected so focus, clipboard and cancellation races
+    /// can be tested without capturing the user's screen or sending any keystrokes.
+    struct Environment {
+        var hasScreenPermission: @MainActor () -> Bool = { WindowCapture.hasPermission }
+        var capture: @MainActor (Target) async -> CGImage? = { await WindowCapture.capture(pid: $0.pid, title: $0.title) }
+        var review: @MainActor (CGImage?, Bool) -> ReviewChoice = { HandoffRecovery.review(image: $0, hasPermission: $1) }
+        var requestPermission: @MainActor () -> Void = {
+            _ = WindowCapture.requestPermission()
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        }
+        var open: @MainActor (AIDestination) async -> AIDestination.Opened? = { await $0.open() }
+        var frontmostPID: @MainActor () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+        var isTrusted: @MainActor () -> Bool = { AXIsProcessTrusted() }
+        var editable: @MainActor (pid_t) -> Bool = { Keyboard.hasEditableFocus(pid: $0) }
+        var press: @MainActor (CGKeyCode, CGEventFlags, pid_t) -> Bool = { Keyboard.press(keyCode: $0, flags: $1, pid: $2) }
+        var stage: @MainActor () -> Pasteboard.Staged = { Pasteboard.beginStaging() }
+        var recover: @MainActor (String, CGImage?, String) -> Void = { HandoffRecovery.shared.show(prompt: $0, image: $1, message: $2) }
+        var clearRecovery: @MainActor () -> Void = { HandoffRecovery.shared.close() }
+        var sleep: @MainActor (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    }
 
     let destinations: [AIDestination]
-    private var isRunning = false
+    private let environment: Environment
+    private var activeID: UUID?
+    private var task: Task<Void, Never>?
+    private var activeClipboard: Pasteboard.Staged?
+    private(set) var lastResult: Result?
+
+    init(destinations: [AIDestination], environment: Environment = Environment()) {
+        self.destinations = destinations
+        self.environment = environment
+    }
 
     /// Which destination the user picked, by rulebook id.
     ///
@@ -66,18 +81,6 @@ final class Handoff {
         set { UserDefaults.standard.set(newValue, forKey: "hasChosenDestination") }
     }
 
-    /// Set once we've asked for Screen Recording, so the ask happens exactly once.
-    private var hasRequestedScreenRecording: Bool {
-        get { UserDefaults.standard.bool(forKey: "hasRequestedScreenRecording") }
-        set { UserDefaults.standard.set(newValue, forKey: "hasRequestedScreenRecording") }
-    }
-
-    private(set) var lastResult: Result?
-
-    init(destinations: [AIDestination]) {
-        self.destinations = destinations
-    }
-
     /// The user's choice if it is usable, and otherwise the old behaviour — because a
     /// chosen destination whose app has since been uninstalled should degrade to
     /// *something working*, not to a failed handoff and a lost capture.
@@ -94,130 +97,112 @@ final class Handoff {
     /// Everything the user could pick, installed or reachable on the web.
     var availableDestinations: [AIDestination] { destinations.filter(\.isAvailable) }
 
-    func run(_ target: Target, completion: @escaping (Result) -> Void) {
-        func finish(_ result: Result) {
-            lastResult = result
-            isRunning = false
-            NSLog("AISlap: handoff — \(result.summary)")
-            completion(result)
-        }
-
-        guard !isRunning else { return }
-        isRunning = true
-
-        guard let destination = preferredDestination else {
-            finish(.failed("No AI destination is configured."))
-            return
-        }
-
-        // Step 2, and the permission it needs. docs/02 defers Screen Recording out of
-        // onboarding to here, the first handoff, where the ask explains itself.
-        //
-        // Asking is a blocking, focus-stealing system prompt, so it happens *before*
-        // anything is staged and this run then stops. Running the rest of the flow
-        // around a modal meant the destination never became frontmost and the paste
-        // went nowhere. macOS also requires a relaunch before the grant takes effect.
-        if !WindowCapture.hasPermission && !hasRequestedScreenRecording {
-            hasRequestedScreenRecording = true
-            _ = WindowCapture.requestPermission()
-            finish(.needsScreenRecording)
-            return
-        }
-
-        Task { @MainActor in
-            let image = WindowCapture.hasPermission
-                ? await WindowCapture.capture(pid: target.pid, title: target.title)
-                : nil
-
-            // Steps 3 and 4. The prompt is the rule's template verbatim: docs/05
-            // forbids interpolating anything from the screen, and the window title in
-            // particular is already reduced to a category token and discarded.
-            let staged = Pasteboard.beginStaging()
-
-            // Step 5.
-            guard let opened = destination.open() else {
-                Pasteboard.put(text: target.prompt)
-                staged.keepPayload()
-                finish(.clipboardOnly(reason: "couldn't open \(destination.name)"))
-                return
-            }
-
-            let timeout = opened.wasAlreadyRunning ? self.warmTimeout : self.coldTimeout
-            let settle = opened.wasAlreadyRunning ? self.warmSettle : self.coldSettle
-
-            self.whenFrontmost(opened.bundleID, timeout: timeout, settle: settle) {
-                arrived in
-                guard arrived else {
-                    Pasteboard.put(text: target.prompt)
-                    staged.keepPayload()
-                    finish(.clipboardOnly(
-                        reason: "\(destination.name) didn't come forward in time"
-                    ))
-                    return
-                }
-
-                Task { @MainActor in
-                    // A handoff belongs in a fresh conversation. Pasting into whatever
-                    // thread was last open drops unrelated context into it, which is
-                    // both confusing and a small privacy problem of its own.
-                    // Native only. On the web fallback the frontmost app is a browser,
-                    // where ⌘N opens a new *window* — so the handoff would paste into a
-                    // blank tab that never navigated anywhere.
-                    if opened.isNative,
-                       let shortcut = destination.newChatShortcut,
-                       let (key, flags) = Keyboard.parse(shortcut) {
-                        Keyboard.press(keyCode: key, flags: flags)
-                        try? await Task.sleep(for: .milliseconds(600))
-                    }
-
-                    // Image and text are pasted separately. One combined write makes
-                    // two pasteboard items and composers read only the first, which is
-                    // exactly how the prompt arrived without its screenshot.
-                    var pastedImage = false
-                    if let image, destination.acceptsPastedImage {
-                        Pasteboard.put(image: image)
-                        pastedImage = Pasteboard.synthesizePaste()
-                        try? await Task.sleep(for: .milliseconds(700))
-                    }
-
-                    Pasteboard.put(text: target.prompt)
-                    guard Pasteboard.synthesizePaste() else {
-                        staged.keepPayload()
-                        finish(.clipboardOnly(reason: "paste didn't go through"))
-                        return
-                    }
-
-                    // Step 6, the line that is never crossed: no Return. The user reads
-                    // what is about to be sent and sends it themselves.
-                    staged.restoreAfterPaste()
-                    finish(.pasted(hadImage: pastedImage))
-                }
-            }
-        }
+    /// Used by erase/pause: no delayed callback may resurrect a cleared payload.
+    func cancel() {
+        activeID = nil
+        task?.cancel()
+        task = nil
+        lastResult = nil
+        activeClipboard?.restoreIfOwned()
+        activeClipboard = nil
+        Task { @MainActor in environment.clearRecovery() }
     }
 
-    private func whenFrontmost(
-        _ bundleID: String,
-        timeout: TimeInterval,
-        settle: TimeInterval,
-        completion: @escaping (Bool) -> Void
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
+    func run(_ target: Target, completion: @escaping (Result) -> Void) {
+        guard activeID == nil else { return }
+        let id = UUID()
+        activeID = id
+        task = Task { @MainActor in
+            let env = environment
+            @MainActor func current() -> Bool { activeID == id && !Task.isCancelled }
+            @MainActor func finish(_ result: Result) {
+                guard current() else { return }
+                lastResult = result
+                activeID = nil
+                task = nil
+                activeClipboard = nil
+                NSLog("AISlap: handoff — \(result.summary)")
+                completion(result)
+            }
+            guard let destination = preferredDestination else {
+                finish(.failed("No AI destination is configured.")); return
+            }
+            env.clearRecovery()
+            let granted = env.hasScreenPermission()
+            let captured = granted ? await env.capture(target) : nil
+            guard current() else { return }
+            let choice = env.review(captured, granted)
+            guard current() else { return }
+            switch choice {
+            case .cancel: finish(.cancelled); return
+            case .permission:
+                env.requestPermission()
+                finish(.needsScreenRecording); return
+            default: break
+            }
+            let image = choice == .includeImage ? captured : nil
+            // Snapshot before opening: a user copy during a cold launch must win.
+            let staged = env.stage()
+            activeClipboard = staged
+            @MainActor func manual(_ reason: String) {
+                guard current() else { return }
+                let copied = staged.put(text: target.prompt)
+                let message = copied ? "Prompt copied. Click the AI composer and press ⌘V. \(reason)"
+                    : "Your newer clipboard was kept. Use Copy prompt below. \(reason)"
+                env.recover(target.prompt, image, message)
+                finish(.clipboardOnly(reason: reason))
+            }
+            guard let opened = await env.open(destination) else {
+                manual("Couldn't open \(destination.name)."); return
+            }
+            guard current() else { return }
+            // Browser login/readiness/composer state cannot be inferred from a process.
+            guard !opened.isWeb else { manual("Paste the screenshot separately if included."); return }
+            guard env.isTrusted() else { manual("Accessibility is needed for automatic paste."); return }
 
-        func poll() {
-            let frontmost = NSWorkspace.shared.frontmostApplication
-            if frontmost?.bundleIdentifier == bundleID, frontmost?.isFinishedLaunching == true {
-                DispatchQueue.main.asyncAfter(deadline: .now() + settle) {
-                    completion(true)
+            // Opening has completed. Wait briefly for activation, then require stable
+            // focus through the settle interval and before every payload operation.
+            var arrived = false
+            for _ in 0..<20 {
+                guard current() else { return }
+                if env.frontmostPID() == opened.pid { arrived = true; break }
+                await env.sleep(0.15)
+            }
+            guard arrived else { manual("The AI app didn't come forward."); return }
+            await env.sleep(opened.wasAlreadyRunning ? 0.35 : 1.5)
+            guard current() else { return }
+            @MainActor func canSend() -> Bool {
+                current() && env.isTrusted() && env.frontmostPID() == opened.pid && staged.ownsClipboard
+            }
+            guard canSend() else { manual("Focus or clipboard changed; automatic paste stopped."); return }
+            if let shortcut = destination.newChatShortcut {
+                guard let (key, flags) = Keyboard.parse(shortcut), env.press(key, flags, opened.pid)
+                else { manual("Couldn't start a new chat."); return }
+                await env.sleep(0.6)
+            }
+            guard current() else { return }
+            guard canSend(), env.editable(opened.pid) else {
+                manual("Click the chat composer to paste."); return
+            }
+            if let image {
+                guard destination.acceptsPastedImage, staged.put(image: image), canSend(),
+                      env.press(9, .maskCommand, opened.pid) else {
+                    manual("Use Copy screenshot to attach the image."); return
                 }
-                return
+                await env.sleep(0.7)
             }
-            guard Date() < deadline else {
-                completion(false)
-                return
+            guard current() else { return }
+            guard canSend(), env.editable(opened.pid), staged.put(text: target.prompt),
+                  canSend(), env.press(9, .maskCommand, opened.pid) else {
+                manual("Automatic paste stopped. You can finish it manually."); return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: poll)
+            // Posting events isn't delivery confirmation. Keep both payloads available
+            // for recovery even after returning the clipboard to its previous owner.
+            env.recover(target.prompt, image, "Paste requested. Check the chat before sending. Copy either part again if needed.")
+            await env.sleep(Pasteboard.restoreDelay)
+            guard current() else { return }
+            staged.restoreIfOwned()
+            finish(.pasteRequested(hadImage: image != nil))
         }
-        poll()
     }
 }

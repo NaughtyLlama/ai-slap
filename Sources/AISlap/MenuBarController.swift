@@ -47,6 +47,8 @@ final class MenuBarController {
     private let ruleStates: () -> [InterruptionEngine.RuleState]
     private let onHandoffNow: () -> Void
     private let onFixPermission: () -> Void
+    private let onShowHistory: () -> Void
+    private let onSetRetention: (Int) -> Void
     private let onExport: () -> Void
     private let onRevealData: () -> Void
     private let onDeleteAll: () -> Void
@@ -71,6 +73,8 @@ final class MenuBarController {
         ruleStates: @escaping () -> [InterruptionEngine.RuleState],
         onHandoffNow: @escaping () -> Void,
         onFixPermission: @escaping () -> Void,
+        onShowHistory: @escaping () -> Void,
+        onSetRetention: @escaping (Int) -> Void,
         onExport: @escaping () -> Void,
         onRevealData: @escaping () -> Void,
         onDeleteAll: @escaping () -> Void
@@ -94,6 +98,8 @@ final class MenuBarController {
         self.ruleStates = ruleStates
         self.onHandoffNow = onHandoffNow
         self.onFixPermission = onFixPermission
+        self.onShowHistory = onShowHistory
+        self.onSetRetention = onSetRetention
         self.onExport = onExport
         self.onRevealData = onRevealData
         self.onDeleteAll = onDeleteAll
@@ -106,8 +112,8 @@ final class MenuBarController {
     /// The icon is the only part of this app most people will ever look at, so a
     /// missing permission has to be visible there. Losing an afternoon to a warning
     /// buried one click deep in a menu is how the last one went.
-    private func applyIcon(hasAccessibility: Bool, notificationsAllowed: Bool) {
-        let broken = !hasAccessibility || !notificationsAllowed
+    private func applyIcon(hasAccessibility: Bool, notificationsAllowed: Bool, style: InterruptionEngine.Style) {
+        let broken = !hasAccessibility || (style == .notification && !notificationsAllowed)
         let symbol = broken ? "exclamationmark.triangle.fill" : "eye"
         let image = NSImage(
             systemSymbolName: symbol,
@@ -271,7 +277,7 @@ final class MenuBarController {
         // The shortcut is owned by the Carbon hotkey, which works globally. Setting it
         // as a menu key equivalent as well would give the combination two owners.
         let handoff = NSMenuItem(
-            title: "Hand this window to Claude  (\u{2325}Space)",
+            title: "Hand this window to AI  (\u{2325}Space)",
             action: #selector(handoffNow), keyEquivalent: ""
         )
         handoff.target = self
@@ -298,8 +304,23 @@ final class MenuBarController {
         pauseItem.action = #selector(togglePause)
         menu.addItem(pauseItem)
 
+        let history = NSMenuItem(title: "Usage history…", action: #selector(showHistory), keyEquivalent: "")
+        history.target = self
+        menu.addItem(history)
+        let retention = NSMenuItem(title: "Keep usage history", action: nil, keyEquivalent: "")
+        let retentionMenu = NSMenu()
+        for days in [0, 30, 90, 365] {
+            let item = NSMenuItem(title: days == 0 ? "Until I delete it (default)" : "\(days) days",
+                                  action: #selector(setRetention(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = days
+            retentionMenu.addItem(item)
+        }
+        retention.submenu = retentionMenu
+        menu.addItem(retention)
+
         let export = NSMenuItem(
-            title: "Export CSV for labelling…", action: #selector(export), keyEquivalent: ""
+            title: "Export usage history…", action: #selector(export), keyEquivalent: ""
         )
         export.target = self
         menu.addItem(export)
@@ -349,7 +370,7 @@ final class MenuBarController {
     ) {
         applyIcon(
             hasAccessibility: hasAccessibility,
-            notificationsAllowed: notificationsAllowed
+            notificationsAllowed: notificationsAllowed, style: style
         )
 
         permissionItem.title = hasAccessibility
@@ -359,7 +380,8 @@ final class MenuBarController {
 
         notificationItem.title = notificationsAllowed
             ? "Notifications allowed"
-            : "⚠️ Notifications blocked — nudges can't appear"
+            : style == .notification ? "⚠️ Notifications blocked — switch to Panel or allow in Settings"
+                : "Notifications optional — panels are available"
         notificationItem.isEnabled = false
         notificationItem.isHidden = notificationsAllowed && hasAccessibility
 
@@ -465,6 +487,10 @@ final class MenuBarController {
     @objc private func testNudge() { onTestNudge() }
     @objc private func handoffNow() { onHandoffNow() }
     @objc private func fixPermission() { onFixPermission() }
+    @objc private func showHistory() { onShowHistory() }
+    @objc private func setRetention(_ sender: NSMenuItem) {
+        if let days = sender.representedObject as? Int { onSetRetention(days) }
+    }
     @objc private func export() { onExport() }
     @objc private func revealData() { onRevealData() }
     @objc private func deleteAll() { onDeleteAll() }

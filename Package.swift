@@ -9,6 +9,7 @@ let package = Package(
             name: "AISlap",
             path: "Sources/AISlap",
             linkerSettings: [.linkedLibrary("sqlite3")]
-        )
+        ),
+        .testTarget(name: "AISlapTests", dependencies: ["AISlap"])
     ]
 )

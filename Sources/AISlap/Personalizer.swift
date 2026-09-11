@@ -159,6 +159,10 @@ final class Personalizer {
 
     /// Rules the user explicitly retired with "Stop suggesting this". The only mute
     /// that does not expire — and it is listed in the menu, never silent.
+    func resetHistoryPreferences() {
+        UserDefaults.standard.removeObject(forKey: "userMutedRules")
+    }
+
     func userMutedRules() -> Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: "userMutedRules") ?? [])
     }

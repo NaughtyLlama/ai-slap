@@ -18,13 +18,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private let hotkeys = GlobalHotkeys()
     private let nudgePanel = NudgePanel()
     private let doug = DougWindow()
+    private let historyWindow = HistoryWindow()
+    private var maintenanceTimer: Timer?
     private var hotkeyRegistered = false
     private var hotkeyPresses = 0
     private var pendingPanel: (eventID: Int64, ruleID: String)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            let store = try SessionStore()
+            let store = try SessionStore(retentionDays: UserDefaults.standard.integer(forKey: "historyRetentionDays"))
             self.store = store
 
             let rulebook = try Rulebook.loadBundled()
@@ -62,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             ruleStates: { [weak self] in self?.engine?.ruleStates() ?? [] },
             onHandoffNow: { [weak self] in self?.handoffNow() },
             onFixPermission: { [weak self] in self?.openAccessibilitySettings() },
+            onShowHistory: { [weak self] in self?.showHistory() },
+            onSetRetention: { [weak self] in self?.setRetention($0) },
             onExport: { [weak self] in self?.export() },
             onRevealData: { [weak self] in self?.revealData() },
             onDeleteAll: { [weak self] in self?.deleteAll() }
@@ -73,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             withTimeInterval: 5, repeats: true
         ) { [weak self] _ in
             self?.refreshMenu()
+        }
+
+        maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            do { try self?.store?.pruneHistory() }
+            catch { NSLog("AISlap: history maintenance failed — \(error.localizedDescription)") }
         }
 
         observer.onChange = { [weak self] context in
@@ -123,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
         UNUserNotificationCenter.current().delegate = self
         InterruptionEngine.registerNotificationCategory()
-        requestNotificationPermission()
+        if engine?.style == .notification { requestNotificationPermission() }
 
         // An unanswered nudge is a soft no. Left as "fired" it inflates the acceptance
         // denominator and never reaches the backoff.
@@ -252,6 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
             observer.refresh()
         } else {
             closeCurrentSession(at: Date())
+            nudgePanel.close()
+            engine?.handoff.cancel()
             isPaused = true
             observer.stop()
         }
@@ -261,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private func toggleNudges() {
         guard let engine else { return }
         engine.isEnabled.toggle()
+        if !engine.isEnabled { nudgePanel.close() }
         refreshMenu()
     }
 
@@ -440,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
 
     private func setStyle(_ style: InterruptionEngine.Style) {
         engine?.style = style
+        if style == .notification { requestNotificationPermission() }
         refreshMenu()
     }
 
@@ -520,25 +533,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     /// it's there. Silence after a failed paste looks identical to a broken app.
     private func report(_ result: Handoff.Result) {
         switch result {
-        case .pasted:
-            break  // They can see it. Saying so as well would be noise.
-        case .clipboardOnly(let reason):
-            notify(
-                title: "It's on your clipboard — press \u{2318}V",
-                body: "Couldn't paste for you: \(reason)."
-            )
+        case .pasteRequested, .clipboardOnly:
+            break // Recovery controls are visible without notification permission.
+        case .cancelled:
+            // He celebrates on the double-click, which was honest when the gesture
+            // *was* the handoff. It now opens a review you can say no to, so take the
+            // celebration back rather than leave him delighted about nothing.
+            doug.reset()
         case .needsScreenRecording:
-            // macOS needs a relaunch before the grant takes effect, so say that
-            // plainly rather than letting the next attempt fail mysteriously.
-            notify(
-                title: "Allow Screen Recording to send the window",
-                body: "Turn on AI-slap in Privacy & Security \u{203A} Screen Recording, "
-                    + "then quit and reopen AI-slap. Handoff works without it, "
-                    + "text only."
-            )
+            doug.reset()
+            let alert = NSAlert()
+            alert.messageText = "Try the handoff again after allowing screenshots"
+            alert.informativeText = "Enable AI-slap in Privacy & Security → Screen Recording. If macOS asks you to quit and reopen, do that first. Text-only handoffs remain available."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         case .failed(let message):
-            notify(title: "Handoff didn't work", body: message)
+            doug.reset()
+            let alert = NSAlert()
+            alert.messageText = "Handoff couldn't continue"
+            alert.informativeText = message
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
+        refreshMenu()
     }
 
     private func notify(title: String, body: String) {
@@ -552,6 +569,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
                 trigger: nil
             )
         )
+    }
+
+    private func showHistory() {
+        guard let store else { return }
+        historyWindow.show(text: store.historySummary())
+    }
+
+    private func setRetention(_ days: Int) {
+        guard let store, [0, 30, 90, 365].contains(days) else { return }
+        if days > 0 && (store.retentionDays == 0 || days < store.retentionDays) {
+            let alert = NSAlert()
+            alert.messageText = "Keep only the last \(days) days?"
+            alert.informativeText = "Older usage history and interruption outcomes will be permanently removed, along with app-managed exports containing expired history."
+            alert.addButton(withTitle: "Change retention")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        store.retentionDays = days
+        UserDefaults.standard.set(days, forKey: "historyRetentionDays")
+        do { try store.pruneHistory(); showHistory() }
+        catch { present(error) }
     }
 
     private func export() {
@@ -572,11 +611,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private func deleteAll() {
         guard let store else { return }
         let alert = NSAlert()
-        alert.messageText = "Delete all logged sessions?"
+        alert.messageText = "Delete all history and learning?"
         alert.informativeText =
-            "This permanently erases the local log at \(store.databaseURL.path), "
-            + "including everything the app has learned about your habits. "
-            + "It cannot be undone."
+            "This erases usage history, interruption outcomes, learned adjustments, muted rules, "
+            + "and CSV exports in AI-slap's data folder. Copied exports elsewhere are not affected. "
+            + "Your app settings and macOS permissions are kept. This cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
@@ -585,8 +624,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             closeCurrentSession(at: Date())
+            observer.stop()
+            nudgePanel.close()
+            historyWindow.close()
+            engine?.resetHistory()
+            defer { if !isPaused { observer.start() }; refreshMenu() }
             try store.deleteAll()
-            refreshMenu()
         } catch {
             present(error)
         }
@@ -604,6 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate,
     private func refreshMenu() {
         guard let store, let menuBar else { return }
 
+        engine?.expireTargets()
         engine?.notificationStatus { [weak self] allowed in
             self?.notificationsAllowed = allowed
         }
