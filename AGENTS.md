@@ -7,6 +7,17 @@ task to Claude in one gesture.
 **This file mirrors [`CLAUDE.md`](CLAUDE.md) so non-Claude agents route the same way. Keep
 the two in sync — if you change one, change the other.**
 
+## There is only one copy of this repository
+
+`<the repo>`. If you are reading this
+anywhere else — `~/Documents/GitHub/ai-slap` is where GitHub Desktop puts clones — stop
+and work in the path above instead.
+
+A whole milestone was once implemented against that other clone while it sat five commits
+behind, and turning a merge into a hand-port cost more than the fixes did. Before editing
+any repository, `git remote get-url origin` and `git log -1`, and look for a second clone
+of the same remote. See `NOTES.md`.
+
 ## Read this first
 
 | You want | Go to |

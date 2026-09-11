@@ -25,9 +25,14 @@ enum WindowCapture {
 
     static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
-    /// Grabs the on-screen window belonging to `pid`, preferring an exact title match.
-    /// Returns nil on any failure — docs/05 says a capture timeout aborts silently
-    /// rather than throwing a modal at someone who is mid-task.
+    /// Require a unique exact title. Never substitute another window. The image is
+    /// reviewed locally before transfer because titles can change or be reused.
+    static func uniqueMatchIndex(titles: [String?], requested: String?) -> Int? {
+        guard let requested, !requested.isEmpty else { return nil }
+        let matches = titles.indices.filter { titles[$0] == requested }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     static func capture(pid: pid_t, title: String?) async -> CGImage? {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
@@ -36,11 +41,9 @@ enum WindowCapture {
             let owned = content.windows.filter {
                 $0.owningApplication?.processID == pid
             }
-            guard !owned.isEmpty else { return nil }
-
-            let target = owned.first { $0.title == title && title != nil }
-                ?? owned.max { area($0) < area($1) }
-            guard let window = target else { return nil }
+            guard let index = uniqueMatchIndex(titles: owned.map(\.title), requested: title)
+            else { return nil }
+            let window = owned[index]
 
             let config = SCStreamConfiguration()
             config.width = Int(window.frame.width * scaleFactor)
@@ -55,10 +58,6 @@ enum WindowCapture {
             NSLog("AISlap: window capture failed — \(error.localizedDescription)")
             return nil
         }
-    }
-
-    private static func area(_ window: SCWindow) -> CGFloat {
-        window.frame.width * window.frame.height
     }
 
     private static var scaleFactor: CGFloat {

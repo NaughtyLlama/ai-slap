@@ -516,3 +516,71 @@ resolved, ⌥⌘G before any call.**
 
 Same shape, same section: `com.google.Chrome.app.meet` only matches Meet installed as a
 Chrome app. Meet in an ordinary tab reports as Chrome and does not suppress.
+
+---
+
+## The review was written against a clone five commits behind
+
+**The most expensive thing about this milestone had nothing to do with the code.** An
+external review and a full implementation — the privacy and handoff fixes, sixteen
+passing tests — were produced against `~/Documents/GitHub/ai-slap`, which is where
+GitHub Desktop puts things and which had not been the working copy since Doug landed.
+Every file the review touched had moved underneath it. What should have been a merge
+became a port.
+
+Nothing about the diagnosis was wrong; all of it applied. But `AppDelegate`,
+`Handoff` and `AIDestination` had all been rewritten in the meantime, so the fixes had
+to be re-grafted by hand and the tests re-run against code they had never seen.
+
+**The check that would have prevented it takes five seconds:** `git remote get-url
+origin` plus `git log -1`, and a look for a second clone of the same remote. A path
+someone hands you is evidence of where they last looked, not of where the truth is.
+This repository now says in `CLAUDE.md` that the workspace copy is the only one.
+
+## A paste event is not a paste
+
+The old `Result.pasted(hadImage:)` was a lie of exactly one word. The app posts a ⌘V to
+another process and has no way to learn what happened to it — whether a composer had
+focus, whether the app was listening, whether anything appeared. Reporting "pasted"
+meant the log agreed with itself while the user looked at an empty box.
+
+It is now `pasteRequested`, and the recovery panel holding both payloads stays up for
+five minutes. This is a smaller change than it looks and a more important one: a product
+that overstates what it knows in the one place the user can check is teaching them to
+discount everything else it says.
+
+## The clipboard race is on the *other* side of the open
+
+Saving and restoring the clipboard is in the spec and was implemented. The gap was that
+both the write and the restore assumed nothing had happened in between — and a cold app
+launch is several seconds, which is plenty of time to copy something.
+
+The fix is ownership: every staged transaction records the pasteboard's change count,
+and a write or a restore that no longer matches is refused rather than forced. A payload
+that loses the race becomes a copy button instead of an overwrite. **A restore is a
+write**, and it deserves the same permission check as the write that preceded it.
+
+## Doug celebrated things that had not happened
+
+Found by porting, not by testing. His double-click was *the handoff*, so celebrating on
+the gesture was honest. The new review step means the gesture now opens something you
+can cancel — and he went on celebrating regardless, including on a failure alert.
+
+The class of bug is worth naming: an optimistic UI is correct exactly until someone adds
+a step that can say no. Doug now resets on cancelled, failed and permission-blocked
+results. Anything that reacts before an outcome exists has to be re-read whenever a new
+outcome is introduced.
+
+## Long-term history was the user's call, and it reversed the spec
+
+`docs/07` specified a rolling 30-day window. Chen asked for the opposite: keep it until
+deleted, because the value of a usage log is the shape it takes over months, and this one
+is the only evidence about whether the product works at all.
+
+So retention is keep-forever by default and 30/90/365 are opt-in, behind a confirmation,
+because choosing 30 days deletes everything older the instant you choose it. The titles
+are what needed to disappear, not the history — and those are now separable, which is the
+part the original spec conflated.
+
+One consequence worth remembering: pruning used to run on launch, which is meaningless
+for an app that stays open for a fortnight. It runs hourly now.
