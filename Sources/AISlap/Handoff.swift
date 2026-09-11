@@ -196,9 +196,11 @@ final class Handoff {
                   canSend(), env.press(9, .maskCommand, opened.pid) else {
                 manual("Automatic paste stopped. You can finish it manually."); return
             }
-            // Posting events isn't delivery confirmation. Keep both payloads available
-            // for recovery even after returning the clipboard to its previous owner.
-            env.recover(target.prompt, image, "Paste requested. Check the chat before sending. Copy either part again if needed.")
+            // Posting events isn't delivery confirmation — but a panel saying so after
+            // every successful handoff is a receipt nobody asked for, and it turned one
+            // gesture into two dismissals. The honesty belongs in the reported status,
+            // which is `pasteRequested`, not in a window. Recovery is for the paths that
+            // actually left the user holding something.
             await env.sleep(Pasteboard.restoreDelay)
             guard current() else { return }
             staged.restoreIfOwned()

@@ -45,6 +45,17 @@ back to text-only handoff.
 Capture the **window**, never the display. A full-screen grab sweeps in whatever else is
 open, which is both a privacy problem and a worse prompt.
 
+**Which window, exactly.** If the frontmost app owns one on-screen window, that is the
+one — there is nothing it could be confused with. Only when it owns several does the
+title have to agree, and if none does, the handoff goes on without a screenshot rather
+than photographing something the user did not mean to share.
+
+⚠️ The title the detector holds comes from the Accessibility API; the window list comes
+from ScreenCaptureKit. **The two do not report the same string for the same window.**
+Requiring them to match before capturing anything sounded strict and meant a browser
+handoff could never take a screenshot at all. Matching titles is a tie-breaker between
+several windows, and it is not sound as a precondition.
+
 ### 3. Build the prompt
 
 From the matched rule's `promptTemplate` ([03](03-rules-and-nudges.md)), or a generic
@@ -96,9 +107,15 @@ focus — and the destination's new-chat shortcut means something else entirely 
 browser. Web handoffs open the page, keep the payload, and ask for an explicit ⌘V.
 
 **Posting a paste event is not proof of delivery.** The status the app reports is
-"paste requested", and the recovery panel with both payloads stays available for five
-minutes afterwards. Reporting a confirmed paste it cannot confirm is how a product
-teaches people not to trust its other claims.
+"paste requested", never "pasted". Reporting a confirmed paste it cannot confirm is how
+a product teaches people not to trust its other claims.
+
+⚠️ **That honesty belongs in the status, not on screen.** The first build of it raised a
+recovery panel after *every* handoff, successful ones included, so a one-gesture flow
+ended in a box to dismiss. A caveat the user must clear by hand is a caveat charged to
+them. The recovery panel is for the paths that actually leave someone holding something:
+a destination that would not open, a focus change that stopped the paste, a web fallback.
+On success, nothing appears.
 
 ### 6. Never auto-submit
 

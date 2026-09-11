@@ -109,11 +109,14 @@ final class HandoffTests: XCTestCase {
         var env = environment(pb)
         var keys: [CGKeyCode] = []
         env.press = { key, _, pid in XCTAssertEqual(pid, 99); keys.append(key); return true }
+        var recoveryShown = false
+        env.recover = { _, _, _ in recoveryShown = true }
         let result = await run(Handoff(destinations: [destination], environment: env))
         guard case .pasteRequested(let hadImage) = result else { return XCTFail("Expected honest requested status") }
         XCTAssertFalse(hadImage)
         XCTAssertEqual(keys, [45, 9])
         XCTAssertEqual(pb.string(forType: .string), "original")
+        XCTAssertFalse(recoveryShown, "A handoff that worked must not leave a panel to dismiss")
     }
 
     func testCancelReviewDoesNotOpenOrStage() async {

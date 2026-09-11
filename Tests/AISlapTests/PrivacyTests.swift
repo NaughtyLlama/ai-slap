@@ -122,11 +122,23 @@ final class PrivacyTests: XCTestCase {
         XCTAssertEqual(store.accumulatedSecondsToday(surface: "Tool_%"), 0)
     }
 
-    func testCaptureRejectsMissingChangedAndAmbiguousTitles() {
-        XCTAssertNil(WindowCapture.uniqueMatchIndex(titles: ["Another window"], requested: "Original"))
-        XCTAssertNil(WindowCapture.uniqueMatchIndex(titles: ["Original", "Original"], requested: "Original"))
-        XCTAssertNil(WindowCapture.uniqueMatchIndex(titles: [nil, "Original"], requested: nil))
-        XCTAssertEqual(WindowCapture.uniqueMatchIndex(titles: ["Other", "Original"], requested: "Original"), 1)
+    func testCaptureNeverSubstitutesAnUnrelatedWindow() {
+        // More than one window and no agreement: refuse rather than guess.
+        XCTAssertNil(WindowCapture.chooseIndex(titles: ["Another window", "A third"], requested: "Original"))
+        XCTAssertNil(WindowCapture.chooseIndex(titles: ["Original", "Original"], requested: "Original"))
+        XCTAssertNil(WindowCapture.chooseIndex(titles: [nil, "Original"], requested: nil))
+        XCTAssertEqual(WindowCapture.chooseIndex(titles: ["Other", "Original"], requested: "Original"), 1)
+    }
+
+    /// The app the user is looking at owns exactly one window, so there is no second
+    /// window to mistake it for. Demanding a title match here compared a string from
+    /// the Accessibility API against one from ScreenCaptureKit — they disagree, and a
+    /// browser handoff could never produce a screenshot.
+    func testSingleWindowNeedsNoTitleAgreement() {
+        XCTAssertEqual(WindowCapture.chooseIndex(titles: ["Teddy (@WarnerTeddy) / X"], requested: "Teddy (@WarnerTeddy) / X — Google Chrome"), 0)
+        XCTAssertEqual(WindowCapture.chooseIndex(titles: [nil], requested: "Anything"), 0)
+        XCTAssertEqual(WindowCapture.chooseIndex(titles: ["Only window"], requested: nil), 0)
+        XCTAssertNil(WindowCapture.chooseIndex(titles: [], requested: "Original"))
     }
     /// Retention and erase are the two controls that destroy data, and they have to
     /// compose: shorten the window, then erase, and the app must still be usable

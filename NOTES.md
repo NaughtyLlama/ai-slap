@@ -584,3 +584,41 @@ part the original spec conflated.
 
 One consequence worth remembering: pruning used to run on launch, which is meaningless
 for an app that stays open for a fortnight. It runs hourly now.
+
+## The fix for a rare wrong answer was a constant no answer
+
+Two hours after installing the privacy milestone, the first real ⌥Space produced a modal
+apologising that it could not identify the window, and then a second panel to dismiss.
+One gesture, two boxes, no screenshot. Both were introduced by the fixes, and both were
+over-corrections of real findings.
+
+**The capture.** The review found that capture could silently select an unrelated window,
+which was true: the old code preferred a title match and otherwise took the app's largest
+window. The fix required a unique exact title match and removed the fallback. But the
+title the detector holds comes from `AXTitle` and the window list comes from
+ScreenCaptureKit, and **those two APIs do not report the same string for the same
+window** — so the match never succeeded and a browser handoff could never produce a
+screenshot.
+
+Worth separating: the danger is *substituting one window for another*, and that is only
+possible when the app owns more than one. One window is not a choice. The rule is now
+"one window needs no agreement; several need a unique title match, or no screenshot" —
+which refuses exactly the case the reviewer was worried about and nothing else.
+
+The debugging is the reusable part. Titles were being read fine (`has_title` was 1 on
+every relevant row), the process ids matched, and a six-second sample showed no title
+drift. Eliminating those left the string comparison as the only thing that could fail,
+without ever reading the two strings side by side — the shell could not, because it is
+not trusted for Accessibility. **Elimination against the app's own recorded data beat
+guessing at the mechanism**, and two of the three hypotheses it killed were mine.
+
+**The panel.** "Posting a ⌘V is not proof it landed" is correct, and it was expressed as
+a floating panel after every handoff — including the ones that worked. A caveat the user
+has to clear by hand is a caveat charged to them. It belongs in the reported status,
+where it already was. Recovery now appears only when someone is actually left holding
+something.
+
+The general shape, and it is the second time this milestone: **a fix aimed at a rare
+wrong answer that produces a constant absent answer is a worse product.** Ask what the
+failure costs when it fires, then ask how often the correct path now fails. Doug
+celebrating handoffs that did not happen was the same mistake pointing the other way.
