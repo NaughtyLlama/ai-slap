@@ -29,7 +29,7 @@ final class Handoff {
         }
     }
 
-    enum ReviewChoice { case includeImage, textOnly, cancel, permission }
+    enum ReviewChoice: Equatable { case includeImage, textOnly, cancel, permission }
 
     /// All external effects are injected so focus, clipboard and cancellation races
     /// can be tested without capturing the user's screen or sending any keystrokes.

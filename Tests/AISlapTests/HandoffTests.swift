@@ -205,5 +205,30 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(pb.string(forType: .string), target.prompt)
     }
 
+    /// "Don't ask again" has to actually stop asking, and the menu tick has to be a way
+    /// back — a preference you can set and not clear is a trap, not a setting.
+    func testSkippingTheReviewIsRememberedAndReversible() {
+        let key = "handoffReview"
+        let previous = UserDefaults.standard.string(forKey: key)
+        defer { UserDefaults.standard.set(previous, forKey: key) }
+
+        HandoffRecovery.preference = .ask
+        XCTAssertEqual(HandoffRecovery.preference, .ask)
+
+        HandoffRecovery.preference = .alwaysInclude
+        XCTAssertEqual(HandoffRecovery.preference, .alwaysInclude)
+        // Skipping must not become a modal by another name: with a preference set, the
+        // review answers itself and never reaches an alert.
+        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true), .includeImage)
+        // No screenshot to include is not a reason to start asking again.
+        XCTAssertEqual(HandoffRecovery.review(image: nil, hasPermission: true), .textOnly)
+
+        HandoffRecovery.preference = .alwaysTextOnly
+        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true), .textOnly)
+
+        HandoffRecovery.preference = .ask
+        XCTAssertEqual(HandoffRecovery.preference, .ask)
+    }
+
     func testNoSubmitShortcutCanBeParsed() { XCTAssertNil(Keyboard.parse("cmd+return")) }
 }

@@ -45,16 +45,25 @@ back to text-only handoff.
 Capture the **window**, never the display. A full-screen grab sweeps in whatever else is
 open, which is both a privacy problem and a worse prompt.
 
-**Which window, exactly.** If the frontmost app owns one on-screen window, that is the
-one — there is nothing it could be confused with. Only when it owns several does the
-title have to agree, and if none does, the handoff goes on without a screenshot rather
-than photographing something the user did not mean to share.
+**Which window, exactly.** Three tests, narrowest first, because each one fails on a
+different kind of app and any one of them alone leaves a hole:
+
+1. **One window is not a choice.** A single on-screen window is the one the user is
+   looking at, and nothing could be confused with it. No agreement required.
+2. **A unique title match.** Works whenever the two APIs agree on the string, which for
+   some apps they do.
+3. **The same rectangle.** A window is in exactly one place, and both APIs report a
+   frame. Compared as overlap rather than equality, since they round differently.
+
+If none resolves, the handoff continues without a screenshot rather than photographing
+something the user did not mean to share. That refusal is the point, and it now only
+fires where it should: several windows open and nothing telling them apart.
 
 ⚠️ The title the detector holds comes from the Accessibility API; the window list comes
-from ScreenCaptureKit. **The two do not report the same string for the same window.**
-Requiring them to match before capturing anything sounded strict and meant a browser
-handoff could never take a screenshot at all. Matching titles is a tie-breaker between
-several windows, and it is not sound as a precondition.
+from ScreenCaptureKit, and **the two do not report the same string for every window** —
+a browser handoff could never take a screenshot while titles were the only test. Which
+test actually identifies a window is logged, because that is a question about other
+people's machines rather than a matter of opinion.
 
 ### 3. Build the prompt
 
@@ -68,7 +77,15 @@ it would leak exactly the content [02](02-detection-architecture.md) is careful 
 ### 3b. Show the capture to its owner first
 
 *Added 2026-09-10.* A screenshot is shown locally, at a readable size, before anything
-is staged or opened. Include it, send text only, or cancel.
+is staged or opened. Include it, send text only, or cancel — each reachable from the
+keyboard, since the flow begins with a keyboard shortcut and a dialog that then demands
+the mouse is a strange thing to ship.
+
+**And it can be turned off, from the dialog that is asking.** A confirmation answered the
+same way every time is not a safeguard, it is a second keystroke — and for someone handing
+off twenty times a day that is the entire cost of the feature. "Don't ask again" records
+the answer just given. The menu keeps a tick to turn it back on, because a preference you
+can set and not clear is a trap rather than a setting.
 
 This was not in the original six steps and it should have been. The whole product asks
 for a permission that lets it photograph a window, and the only thing that makes that

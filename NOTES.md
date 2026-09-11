@@ -622,3 +622,44 @@ The general shape, and it is the second time this milestone: **a fix aimed at a 
 wrong answer that produces a constant absent answer is a worse product.** Ask what the
 failure costs when it fires, then ask how often the correct path now fails. Doug
 celebrating handoffs that did not happen was the same mistake pointing the other way.
+
+## Three tests beat one, and the confirmation had to be optional
+
+Chen's reply to the single-window fix was "couldn't you have both of these in place, belt
+and suspenders?" — and he was right, for a reason the fix had skipped over. Obsidian
+*had* captured, with two windows open, which meant the title test genuinely works for
+some apps. Narrowing the rule to "one window only" would have thrown that away to solve
+the browser case.
+
+So the rule is three tests, narrowest first: a lone window, then a unique title, then the
+same rectangle. They fail on different apps, which is exactly the argument for keeping
+all three — a single test is a single point of failure, and the cost of a second one here
+is a handful of lines.
+
+**Match by geometry rather than by name where you can.** A name is a string two APIs
+format differently. A window is in one place, and both report a frame. Compared as
+overlap rather than equality, because they round to points differently and a shadow
+should not lose a window that is plainly the same one. Which test won is logged, since
+the honest position is that this has been verified on one Mac.
+
+### A confirmation you always answer the same way is a keystroke, not a safeguard
+
+The screenshot review exists because the app is holding a photograph of your screen. That
+justification is real and it does not survive being charged twenty times a day. Chen asked
+for the toggle from inside the dialog, which is the right place: the moment it annoys you
+is the moment you know your answer.
+
+Two details that make it a setting rather than a trap. It records **the answer just
+given** rather than guessing which one was meant, so "don't ask again" after *Text only*
+does not silently start attaching screenshots. And the menu keeps a tick to turn it back
+on — a preference you can set and cannot clear is a one-way door out of the only privacy
+control this flow has.
+
+Every button in that dialog now answers to the keyboard too. The flow starts with a
+keyboard shortcut; making the user reach for the mouse to finish it was friction nobody
+chose.
+
+**One trap for anyone testing this.** `HandoffRecovery.review` opens a real modal, so a
+test that reaches it does not fail — it hangs forever waiting for a click. Set the
+preference before calling it. A mutation that deleted the preference check proved the
+test was load-bearing by hanging the suite, which is a signal, but not a pleasant one.

@@ -23,6 +23,7 @@ final class MenuBarController {
     private let destinationItem = NSMenuItem()
     private let mascotToggleItem = NSMenuItem()
     private let calmItem = NSMenuItem()
+    private let reviewItem = NSMenuItem()
     private var tierItems: [DougWindow.Tier: NSMenuItem] = [:]
     private let panicItem = NSMenuItem()
     private let rulesItem = NSMenuItem()
@@ -289,6 +290,14 @@ final class MenuBarController {
         destinationItem.submenu = NSMenu()
         menu.addItem(destinationItem)
 
+        // Ticked means the handoff stops to show you the screenshot. Unticking it here
+        // is the way back from having ticked "don't ask again" in the dialog, which is
+        // otherwise a one-way door out of the only privacy control this flow has.
+        reviewItem.title = "Check the screenshot first"
+        reviewItem.target = self
+        reviewItem.action = #selector(toggleHandoffReview)
+        menu.addItem(reviewItem)
+
         menu.addItem(.separator())
 
         // docs/04 ships this as a hotkey and a menu item, both instant.
@@ -437,6 +446,7 @@ final class MenuBarController {
             ? "Calm mode — forced on by Reduce Motion"
             : "Calm mode — he only appears to interrupt"
         calmItem.state = (calmMode || systemReduced) ? .on : .off
+        reviewItem.state = HandoffRecovery.preference == .ask ? .on : .off
         calmItem.isEnabled = !systemReduced
         for (key, item) in tierItems {
             item.state = key == maxTier ? .on : .off
@@ -550,6 +560,13 @@ final class MenuBarController {
     @objc private func togglePanic() { onTogglePanic() }
     @objc private func toggleMascot() { onToggleMascot() }
     @objc private func toggleCalmMode() { onToggleCalmMode() }
+
+    /// Turning it back on is all-or-nothing on purpose: whichever "always" they landed
+    /// on, the way out is the same tick, and there is no third state to explain.
+    @objc private func toggleHandoffReview() {
+        HandoffRecovery.preference = HandoffRecovery.preference == .ask ? .alwaysInclude : .ask
+        reviewItem.state = HandoffRecovery.preference == .ask ? .on : .off
+    }
 
     @objc private func setMaxTier(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? Int,

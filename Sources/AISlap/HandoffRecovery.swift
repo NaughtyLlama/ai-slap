@@ -8,7 +8,27 @@ final class HandoffRecovery: NSObject {
     private var image: CGImage?
     private var expiry: Timer?
 
+    /// Whether the handoff stops to show you the screenshot first.
+    ///
+    /// It defaults to asking, because the app is holding a photograph of your screen and
+    /// the only thing that makes that bearable is seeing it before it leaves. But a
+    /// confirmation you always answer the same way is just a second keystroke, and for
+    /// someone handing off twenty times a day that is the whole cost of the feature.
+    /// So it is a preference, set from the dialog itself at the moment it annoys you.
+    enum Preference: String { case ask, alwaysInclude, alwaysTextOnly }
+
+    static var preference: Preference {
+        get { Preference(rawValue: UserDefaults.standard.string(forKey: "handoffReview") ?? "") ?? .ask }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "handoffReview") }
+    }
+
     static func review(image: CGImage?, hasPermission: Bool) -> Handoff.ReviewChoice {
+        switch preference {
+        case .alwaysInclude: return image != nil ? .includeImage : .textOnly
+        case .alwaysTextOnly: return .textOnly
+        case .ask: break
+        }
+
         let alert = NSAlert()
         alert.messageText = image == nil ? "Hand over text only?" : "Hand over this screenshot?"
         alert.informativeText = image != nil
@@ -16,27 +36,56 @@ final class HandoffRecovery: NSObject {
             : hasPermission
                 ? "The original window couldn't be identified uniquely or captured. No other window was substituted. You can still hand over the prompt."
                 : "Screenshots are optional. Continue with the prompt, or enable Screen Recording and try again."
+
+        // Every button reachable from the keyboard. The first one already answers to
+        // Return; the rest would otherwise need the mouse, which for a dialog that
+        // interrupts a keyboard shortcut is a strange thing to insist on.
+        var buttons: [NSButton] = []
         if let image {
             let view = NSImageView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
             view.image = NSImage(cgImage: image, size: .zero)
             view.imageScaling = .scaleProportionallyUpOrDown
             alert.accessoryView = view
-            alert.addButton(withTitle: "Include screenshot")
-            alert.addButton(withTitle: "Text only")
-            alert.addButton(withTitle: "Cancel")
+            buttons.append(alert.addButton(withTitle: "Include screenshot"))
+            buttons.append(alert.addButton(withTitle: "Text only"))
+            buttons.append(alert.addButton(withTitle: "Cancel"))
+            buttons[1].keyEquivalent = "t"
+            buttons[1].keyEquivalentModifierMask = .command
         } else {
-            alert.addButton(withTitle: "Continue text only")
-            alert.addButton(withTitle: "Cancel")
-            if !hasPermission { alert.addButton(withTitle: "Screenshot settings…") }
+            buttons.append(alert.addButton(withTitle: "Continue text only"))
+            buttons.append(alert.addButton(withTitle: "Cancel"))
+            if !hasPermission {
+                buttons.append(alert.addButton(withTitle: "Screenshot settings…"))
+                buttons[2].keyEquivalent = "s"
+                buttons[2].keyEquivalentModifierMask = .command
+            }
         }
+        buttons[0].keyEquivalent = "\r"
+        buttons[1].keyEquivalent = "\u{1b}"
+
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = image != nil
+            ? "Don't ask again — hand it over as soon as I press the key"
+            : "Don't ask again — carry on without a screenshot"
+
         NSApp.activate(ignoringOtherApps: true)
         let result = alert.runModal()
-        if image != nil {
-            return result == .alertFirstButtonReturn ? .includeImage
-                : result == .alertSecondButtonReturn ? .textOnly : .cancel
+        let choice: Handoff.ReviewChoice = image != nil
+            ? (result == .alertFirstButtonReturn ? .includeImage
+                : result == .alertSecondButtonReturn ? .textOnly : .cancel)
+            : (result == .alertFirstButtonReturn ? .textOnly
+                : result == .alertThirdButtonReturn ? .permission : .cancel)
+
+        // Remember the answer they just gave, not a guess at which one they meant.
+        // Cancelling is not a preference about future handoffs.
+        if alert.suppressionButton?.state == .on {
+            switch choice {
+            case .includeImage: preference = .alwaysInclude
+            case .textOnly: preference = .alwaysTextOnly
+            case .cancel, .permission: break
+            }
         }
-        return result == .alertFirstButtonReturn ? .textOnly
-            : result == .alertThirdButtonReturn ? .permission : .cancel
+        return choice
     }
 
     func show(prompt: String, image: CGImage?, message: String) {
