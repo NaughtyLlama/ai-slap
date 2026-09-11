@@ -663,3 +663,26 @@ chose.
 test that reaches it does not fail — it hangs forever waiting for a click. Set the
 preference before calling it. A mutation that deleted the preference check proved the
 test was load-bearing by hanging the suite, which is a signal, but not a pleasant one.
+
+### Verified: position is what identified the window, on the first real try
+
+Chen's Finder test, 13:02 on 11 September. Finder had three windows open and **two of
+them were both called "BBP Certification"** — so the title test could not resolve it,
+and with three windows the lone-window test did not apply. The capture succeeded anyway,
+on window 14296 at (452, 474), and not on the other "BBP Certification" at (423, 445).
+
+Only the rectangle could have picked that. So the geometry test works on a real machine,
+the two APIs do agree about frames, and the belt-and-suspenders argument paid for itself
+on the first handoff after it shipped: with titles as the only fallback, this exact
+handoff would have refused.
+
+Two duplicate titles in one app was also not a hypothetical edge case. It was just what
+was open.
+
+**The evidence came from ScreenCaptureKit's own logging, not ours.** The `NSLog` lines
+added for exactly this purpose never reached the unified log — the app's own messages do
+not appear under a `processIdentifier` predicate even with `--info --debug`, while every
+framework message does. Worth replacing with `os.Logger` and an explicit subsystem before
+relying on app logs again. What worked instead: filtering the app's log for ScreenCaptureKit
+entries, reading the `frame=` on the `SCWindow` it selected, and matching that against a
+live window dump.
