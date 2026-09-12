@@ -18,3 +18,7 @@ dist/
 
 # Session artifacts — yours, and they stay on your machine
 outputs/
+
+# Yours, about this machine and this week. Not part of the product.
+HANDOFF.md
+parking-lot.md

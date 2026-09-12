@@ -21,7 +21,7 @@ machine. See `NOTES.md` for how that went.
 
 | You want | Go to |
 |---|---|
-| **What state is this in? What do I do next?** | [`HANDOFF.md`](HANDOFF.md) — always start here |
+| **What state is this in? What do I do next?** | `HANDOFF.md` — always start here. Local only, not in the repo |
 | Why is the code like this? What already went wrong? | [`NOTES.md`](NOTES.md) |
 | What the app does, step by step | [`docs/handoff.md`](docs/handoff.md) |
 | What someone else is given when they receive it | [`docs/READ-ME-FIRST.md`](docs/READ-ME-FIRST.md) |
@@ -96,5 +96,9 @@ find yourself adding one, that is a product decision and not an implementation d
 - **Three files, three jobs.** `CLAUDE.md` routes and rarely changes. `HANDOFF.md` is
   rewritten each session and is the only description of the present. `NOTES.md` is
   appended to and explains why.
+- **`HANDOFF.md` and `parking-lot.md` are not in the repo, on purpose.** They describe
+  one person's machine and one week's work, and this repo is public. They live on disk
+  and are ignored. Anything in them that turns out to be about the *code* belongs in
+  `NOTES.md` instead, where everyone can read it.
 - `AGENTS.md` is a generated mirror of this file. Edit `CLAUDE.md`, then copy it across
   with the header line swapped.
