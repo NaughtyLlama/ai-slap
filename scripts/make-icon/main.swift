@@ -11,6 +11,10 @@ func icon(px: CGFloat) -> Data {
     let image = NSImage(size: NSSize(width: px, height: px))
     image.lockFocus()
     let ctx = NSGraphicsContext.current!.cgContext
+    // A pixel sprite should have hard edges at every size. This does not meaningfully
+    // shrink the file — the icns is large because it stores ten sizes — but a blurred
+    // 16px Doug in the menu bar would be wrong.
+    ctx.interpolationQuality = .none
 
     let inset = px * 0.08
     let plate = NSRect(x: inset, y: inset, width: px - inset * 2, height: px - inset * 2)
@@ -28,6 +32,7 @@ func icon(px: CGFloat) -> Data {
         y: (px - sprite.height) / 2 + sprite.height
     )
     ctx.scaleBy(x: 1, y: -1)  // the sprite grid draws from its top-left
+    ctx.setShouldAntialias(false)
     Doug.draw(mood: .content, scale: scale, legFrame: false, facingLeft: false)
     ctx.restoreGState()
 
