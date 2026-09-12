@@ -31,13 +31,12 @@ final class HandoffRecovery: NSObject {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "handoffReview") }
     }
 
-    static func review(image: CGImage?, hasPermission: Bool, prompt: String) -> Handoff.ReviewChoice {
-        switch preference {
-        case .alwaysInclude: return .send(prompt: prompt, includeImage: image != nil)
-        case .alwaysTextOnly: return .send(prompt: prompt, includeImage: false)
-        case .ask: break
-        }
-
+    /// Building the dialog is separate from running it so `scripts/design-preview.sh`
+    /// can render exactly this, offscreen, and someone can look at it without a handoff
+    /// happening. A second copy in the preview tool would drift within a session.
+    static func makeReviewAlert(image: CGImage?, hasPermission: Bool, prompt: String)
+        -> (alert: NSAlert, field: NSTextField)
+    {
         let alert = NSAlert()
         alert.messageText = image == nil ? "Send this without a screenshot?" : "Send this to your AI?"
         alert.informativeText = image != nil
@@ -49,12 +48,16 @@ final class HandoffRecovery: NSObject {
         // The prompt field is the point. The app knows nothing about your work beyond a
         // picture of it, so the one useful thing it can do is get out of the way and let
         // you say what you actually want before the chat opens.
+        // Single line on purpose. A wrapping field swallows Return to make a new
+        // paragraph, and then the obvious way to send — type, press Return — silently
+        // does nothing. A sentence is what this box is for; anything longer can be
+        // pasted and will scroll.
         let field = NSTextField(string: prompt)
         field.placeholderString = "What do you want done with this?"
-        field.lineBreakMode = .byWordWrapping
-        field.usesSingleLineMode = false
-        field.cell?.wraps = true
-        field.cell?.isScrollable = false
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.font = .systemFont(ofSize: 13)
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -71,8 +74,9 @@ final class HandoffRecovery: NSObject {
         }
         field.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: 440).isActive = true
+        field.heightAnchor.constraint(equalToConstant: 26).isActive = true
         stack.addArrangedSubview(field)
-        stack.frame = NSRect(x: 0, y: 0, width: 440, height: image == nil ? 44 : 294)
+        stack.frame = NSRect(x: 0, y: 0, width: 440, height: image == nil ? 30 : 280)
         alert.accessoryView = stack
 
         var buttons: [NSButton] = []
@@ -92,7 +96,17 @@ final class HandoffRecovery: NSObject {
 
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Don't ask again — just send it"
+        return (alert, field)
+    }
 
+    static func review(image: CGImage?, hasPermission: Bool, prompt: String) -> Handoff.ReviewChoice {
+        switch preference {
+        case .alwaysInclude: return .send(prompt: prompt, includeImage: image != nil)
+        case .alwaysTextOnly: return .send(prompt: prompt, includeImage: false)
+        case .ask: break
+        }
+
+        let (alert, field) = makeReviewAlert(image: image, hasPermission: hasPermission, prompt: prompt)
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = field
         let result = alert.runModal()

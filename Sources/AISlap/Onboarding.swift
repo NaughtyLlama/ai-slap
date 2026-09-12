@@ -74,47 +74,44 @@ enum Onboarding {
     /// Both permissions, explained in terms of what breaks without them rather than in
     /// terms of what they are called in System Settings.
     private static func permissions() {
-        while true {
-            let accessibility = AXIsProcessTrusted()
-            let screen = WindowCapture.hasPermission
-            if accessibility && screen { return }
+        let accessibility = AXIsProcessTrusted()
+        let screen = WindowCapture.hasPermission
+        if accessibility && screen { return }
 
-            let alert = NSAlert()
-            alert.messageText = "Two permissions and you're done"
-            alert.informativeText = """
-                \(accessibility ? "✓" : "•") Accessibility lets AI-slap paste into your AI app. \
-                Without it the handoff stops at your clipboard and you press ⌘V yourself.
+        let alert = NSAlert()
+        alert.messageText = "Two permissions and you're done"
+        alert.informativeText = """
+            \(accessibility ? "✓" : "•") Accessibility lets AI-slap paste into your AI app. \
+            Without it the handoff stops at your clipboard and you press ⌘V yourself.
 
-                \(screen ? "✓" : "•") Screen Recording lets it take the screenshot. \
-                Without it handoffs go over as text only.
+            \(screen ? "✓" : "•") Screen Recording lets it take the screenshot. \
+            Without it handoffs go over as text only.
 
-                macOS may ask you to quit and reopen AI-slap after you grant Accessibility. \
-                That's normal.
-                """
-            if !accessibility { alert.addButton(withTitle: "Turn on Accessibility") }
-            if !screen { alert.addButton(withTitle: "Turn on Screenshots") }
-            alert.addButton(withTitle: accessibility || screen ? "Finish" : "Skip for now")
+            macOS may ask you to quit and reopen AI-slap after you grant Accessibility. \
+            That's normal.
+            """
+        if !accessibility { alert.addButton(withTitle: "Turn on Accessibility") }
+        if !screen { alert.addButton(withTitle: "Turn on Screenshots") }
+        alert.addButton(withTitle: accessibility || screen ? "Finish" : "Skip for now")
 
-            let clicked = alert.runModal()
-            let first = NSApplication.ModalResponse.alertFirstButtonReturn
-            let wantsAccessibility = !accessibility && clicked == first
-            let wantsScreen = !screen && clicked == (accessibility ? first : .alertSecondButtonReturn)
+        let clicked = alert.runModal()
+        let first = NSApplication.ModalResponse.alertFirstButtonReturn
+        let wantsAccessibility = !accessibility && clicked == first
+        let wantsScreen = !screen && clicked == (accessibility ? first : .alertSecondButtonReturn)
 
-            if wantsAccessibility {
-                _ = AXIsProcessTrustedWithOptions(
-                    [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-                )
+        if wantsAccessibility {
+            _ = AXIsProcessTrustedWithOptions(
+                [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+            )
+            NSWorkspace.shared.open(URL(string:
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+            return  // The grant needs System Settings and often a relaunch; don't loop on it.
+        }
+        if wantsScreen {
+            _ = WindowCapture.requestPermission()
+            if !WindowCapture.hasPermission {
                 NSWorkspace.shared.open(URL(string:
-                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                return  // The grant needs System Settings and often a relaunch; don't loop on it.
-            }
-            if wantsScreen {
-                _ = WindowCapture.requestPermission()
-                if !WindowCapture.hasPermission {
-                    NSWorkspace.shared.open(URL(string:
-                        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                }
-                return
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
             }
             return
         }
