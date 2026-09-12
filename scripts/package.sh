@@ -19,13 +19,19 @@ mkdir -p dist
 cp docs/READ-ME-FIRST.md dist/READ-ME-FIRST.md
 
 echo
-if codesign -dv build/AISlap.app 2>&1 | grep -q "TeamIdentifier=not set"; then
-    echo "!!  Ad-hoc signed. Recipients will hit Gatekeeper and need the right-click → Open"
-    echo "!!  step in dist/READ-ME-FIRST.md. A Developer ID plus notarisation removes it."
+# Ask the question that actually matters — "will another Mac open this?" — rather than
+# parsing the signature and inferring. Gatekeeper is the thing recipients will meet.
+if /usr/sbin/spctl --assess --type execute build/AISlap.app >/dev/null 2>&1; then
+    echo "==> Gatekeeper accepts this build. Recipients can just double-click."
 else
-    echo "==> Signed with a real identity. Notarise before sending:"
-    echo "    xcrun notarytool submit dist/AISlap.zip --keychain-profile <profile> --wait"
-    echo "    xcrun stapler staple build/AISlap.app   # then re-zip"
+    echo "!!  Gatekeeper REJECTS this build, which is expected without a Developer ID."
+    echo "!!  Recipients get \"Apple cannot check it for malicious software\" and need the"
+    echo "!!  right-click -> Open step in dist/READ-ME-FIRST.md."
+    echo "!!"
+    echo "!!  To remove that step:"
+    echo "!!    DEVELOPER_ID=\"Developer ID Application: NAME (TEAMID)\" ./scripts/package.sh"
+    echo "!!    xcrun notarytool submit dist/AISlap.zip --keychain-profile PROFILE --wait"
+    echo "!!    xcrun stapler staple build/AISlap.app && ./scripts/package.sh"
 fi
 echo "==> $(cd dist && pwd)"
 ls -lh dist
