@@ -37,7 +37,7 @@ final class HandoffTests: XCTestCase {
         var env = Handoff.Environment()
         env.hasScreenPermission = { false }
         env.capture = { _ in XCTFail("Must not capture without permission"); return nil }
-        env.review = { _, _ in .textOnly }
+        env.review = { _, _, prompt in .send(prompt: prompt, includeImage: false) }
         env.requestPermission = { XCTFail("Text-only must not request permission") }
         env.open = { _ in AIDestination.Opened(pid: 99, bundleID: "fake", wasAlreadyRunning: true, isWeb: false) }
         env.frontmostPID = { 99 }
@@ -123,7 +123,7 @@ final class HandoffTests: XCTestCase {
         let pb = board(); defer { pb.releaseGlobally() }
         pb.setString("original", forType: .string)
         var env = environment(pb)
-        env.review = { _, _ in .cancel }
+        env.review = { _, _, _ in .cancel }
         env.open = { _ in XCTFail("Cancelled"); return nil }
         let result = await run(Handoff(destinations: [destination], environment: env))
         guard case .cancelled = result else { return XCTFail("Expected cancelled") }
@@ -146,7 +146,7 @@ final class HandoffTests: XCTestCase {
         var env = environment(pb)
         env.hasScreenPermission = { true }
         env.capture = { _ in Self.pixel() }
-        env.review = { _, _ in .includeImage }
+        env.review = { _, _, prompt in .send(prompt: prompt, includeImage: true) }
         env.requestPermission = { XCTFail("Permission was already granted") }
         var foreground: pid_t = 99
         env.frontmostPID = { foreground }
@@ -190,7 +190,7 @@ final class HandoffTests: XCTestCase {
         var env = environment(pb)
         env.hasScreenPermission = { true }
         env.capture = { _ in Self.pixel() }
-        env.review = { _, _ in .includeImage }
+        env.review = { _, _, prompt in .send(prompt: prompt, includeImage: true) }
         env.requestPermission = { XCTFail("Permission was already granted") }
         env.open = { _ in nil }
         env.press = { _, _, _ in XCTFail("Nothing opened"); return false }
@@ -219,15 +219,50 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(HandoffRecovery.preference, .alwaysInclude)
         // Skipping must not become a modal by another name: with a preference set, the
         // review answers itself and never reaches an alert.
-        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true), .includeImage)
+        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true, prompt: "P"), .send(prompt: "P", includeImage: true))
         // No screenshot to include is not a reason to start asking again.
-        XCTAssertEqual(HandoffRecovery.review(image: nil, hasPermission: true), .textOnly)
+        XCTAssertEqual(HandoffRecovery.review(image: nil, hasPermission: true, prompt: "P"), .send(prompt: "P", includeImage: false))
 
         HandoffRecovery.preference = .alwaysTextOnly
-        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true), .textOnly)
+        XCTAssertEqual(HandoffRecovery.review(image: Self.pixel(), hasPermission: true, prompt: "P"), .send(prompt: "P", includeImage: false))
 
         HandoffRecovery.preference = .ask
         XCTAssertEqual(HandoffRecovery.preference, .ask)
+    }
+
+    /// The canned line is a starting point, not the message. Whatever the user typed in
+    /// the review is what has to reach the clipboard — anything else silently discards
+    /// the only thing in this app that knows what they actually wanted.
+    func testWhatYouTypeIsWhatGetsSent() async {
+        let pb = board(); defer { pb.releaseGlobally() }
+        var env = environment(pb)
+        env.review = { _, _, _ in .send(prompt: "Why is this query slow?", includeImage: false) }
+        var recovered: String?
+        env.recover = { prompt, _, _ in recovered = prompt }
+        var staged: [String] = []
+        env.press = { key, _, _ in
+            if key == 9 { staged.append(pb.string(forType: .string) ?? "") }
+            return true
+        }
+        let result = await run(Handoff(destinations: [destination], environment: env))
+        guard case .pasteRequested = result else { return XCTFail("Expected a handoff") }
+        XCTAssertEqual(staged, ["Why is this query slow?"])
+        XCTAssertNil(recovered, "A handoff that worked leaves no panel")
+    }
+
+    /// The same on the failure path: a manual paste must offer the typed prompt, not the
+    /// default the user replaced.
+    func testTypedPromptSurvivesAFailedHandoff() async {
+        let pb = board(); defer { pb.releaseGlobally() }
+        var env = environment(pb)
+        env.review = { _, _, _ in .send(prompt: "Summarise this thread", includeImage: false) }
+        env.open = { _ in nil }
+        var recovered: String?
+        env.recover = { prompt, _, _ in recovered = prompt }
+        let result = await run(Handoff(destinations: [destination], environment: env))
+        guard case .clipboardOnly = result else { return XCTFail("Expected manual paste") }
+        XCTAssertEqual(recovered, "Summarise this thread")
+        XCTAssertEqual(pb.string(forType: .string), "Summarise this thread")
     }
 
     func testNoSubmitShortcutCanBeParsed() { XCTAssertNil(Keyboard.parse("cmd+return")) }

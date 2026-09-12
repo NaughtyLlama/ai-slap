@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "_comment": "Where a handoff can go. Kept out of the code so a vendor renaming an app or changing a shortcut is a file edit rather than a new build.",
+  "destinations": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "bundleId": "com.anthropic.claudefordesktop",
+      "webURL": "https://claude.ai/new",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
+    },
+    {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "bundleId": "com.openai.codex",
+      "webURL": "https://chatgpt.com",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "bundleId": "com.google.GeminiMacOS",
+      "webURL": "https://gemini.google.com/app",
+      "newChatShortcut": "cmd+n",
+      "acceptsPastedImage": true
+    },
+    {
+      "id": "perplexity",
+      "name": "Perplexity",
+      "bundleId": null,
+      "webURL": "https://www.perplexity.ai/",
+      "newChatShortcut": null,
+      "acceptsPastedImage": true
+    }
+  ]
+}

@@ -78,6 +78,20 @@ enum WindowCapture {
         return (hit.width * hit.height) / union
     }
 
+    /// What the app calls its focused window. Only ever used to tell one window of the
+    /// same app from another, and never stored anywhere.
+    static func focusedWindowTitle(pid: pid_t) -> String? {
+        var windowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute as CFString, &windowRef
+        ) == .success, let windowRef else { return nil }
+        var titleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            windowRef as! AXUIElement, kAXTitleAttribute as CFString, &titleRef
+        ) == .success, let title = titleRef as? String, !title.isEmpty else { return nil }
+        return title
+    }
+
     /// Where the app says its focused window is. Needs Accessibility, which the app
     /// already holds for detection, and costs nothing when it is missing.
     static func focusedWindowFrame(pid: pid_t) -> CGRect? {

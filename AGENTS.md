@@ -1,8 +1,8 @@
 # AI-slap
 
-A macOS menu-bar app with a desktop mascot that watches which app you're in, notices when
-you're doing something by hand that AI could do, interrupts you about it, and hands the
-task to Claude in one gesture.
+Press ⌥Space on any window. It photographs that window, opens a new chat in your AI, and
+pastes it in with whatever you want to ask. Doug the hermit crab lives on the desktop and
+is the same button. Nothing is recorded anywhere.
 
 **This file mirrors [`CLAUDE.md`](CLAUDE.md) so non-Claude agents route the same way. Keep
 the two in sync — if you change one, change the other.**
@@ -24,9 +24,8 @@ of the same remote. See `NOTES.md`.
 |---|---|
 | **What state is this in? What do I do next?** | [`HANDOFF.md`](HANDOFF.md) — always start here |
 | Why is the code like this? What already went wrong? | [`NOTES.md`](NOTES.md) |
-| What is the product, and what was specced? | [`README.md`](README.md), then `docs/01`–`08` in order |
-| How detection works | `docs/02` — most load-bearing technical doc |
-| The mascot, escalation, suppression | `docs/04` |
+| What the app does, step by step | [`docs/handoff.md`](docs/handoff.md) |
+| What someone else is given when they receive it | [`docs/READ-ME-FIRST.md`](docs/READ-ME-FIRST.md) |
 | What Doug looks like, and why | `Doug.dc.html` — open it in a browser |
 
 **This file is a router, not a log.** It should rarely change. Current state goes in
@@ -39,29 +38,27 @@ goes stale silently and then misleads.
 Package.swift                          SwiftPM manifest (no Xcode project by design)
 Sources/AISlap/
   main.swift                           NSApplication bootstrap, .accessory policy
-  AppDelegate.swift                    session open/close, permissions, menu actions
-  WindowContext.swift                  the observed-context and session types
-  WindowContextObserver.swift          tier 0 + tier 1 detection
-  SessionStore.swift                   local SQLite log + CSV export
-  SessionStore+Analytics.swift         dwell history and interruption outcomes
-  Rulebook.swift                       rule schema, loading, compiled matching
-  Personalizer.swift                   per-user adaptation
-  InterruptionEngine.swift             gating + delivery
-  NudgePanel.swift                     the interruption window — Doug's speech bubble
-  DougSprite.swift                     the pixel grids, copied verbatim from Doug.dc.html
-  DougWindow.swift                     Doug on the desktop, the tier ladder, taste settings
-  Suppression.swift                    when nothing may appear
-  Handoff.swift                        capture → prompt → clipboard → paste
-  WindowCapture.swift                  ScreenCaptureKit, one window only
-  AIDestination.swift                  where a handoff goes
-  Pasteboard.swift                     staging, restore, synthesised keystrokes
+  AppDelegate.swift                    wiring: hotkeys, menu, Doug, handoff results
+  Onboarding.swift                     first run — what it does, which AI, two permissions
+  Handoff.swift                        capture → review → open → guarded paste
+  HandoffRecovery.swift                the review dialog, and the rescue panel
+  WindowCapture.swift                  ScreenCaptureKit, one window, three ways to find it
+  AIDestination.swift                  opening an AI app or its website
+  Destinations.swift                   loads destinations.json, falls back to built-ins
+  Pasteboard.swift                     ownership-checked staging, restore, keystrokes
   GlobalHotkey.swift                   ⌥Space and ⌥⌘G via Carbon
   MenuBarController.swift              the menu
-Resources/rulebook.json                rules, AI contexts, destinations, suppression
-Resources/Info.plist                   LSUIElement, bundle ID, version
+  DougSprite.swift                     the pixel grids, copied verbatim from Doug.dc.html
+  DougWindow.swift                     Doug on the desktop: wandering, dragging, moods
+  LaunchAtLogin.swift                  the login item
+Resources/destinations.json            where a handoff can go
+Resources/AISlap.icns                  generated from the sprite by scripts/make-icon.sh
+Resources/Info.plist                   LSUIElement, bundle ID, version, icon
 scripts/build-app.sh                   source → AISlap.app, Command Line Tools only
+scripts/package.sh                     → dist/AISlap.zip plus the note for recipients
 scripts/make-signing-identity.sh       run once; stops rebuilds revoking Accessibility
-scripts/design-preview.sh              renders Doug + the bubble offscreen, to PNGs
+scripts/make-icon.sh                   regenerate the icon when Doug changes
+scripts/design-preview.sh              renders Doug offscreen, to a PNG
 Doug.dc.html                           the design canvas — the source for the sprite
 ```
 
@@ -71,40 +68,34 @@ Doug.dc.html                           the design canvas — the source for the 
 ./scripts/build-app.sh --run
 ```
 
-Log lives at `~/Library/Application Support/AISlap/phase0.sqlite`. Never in the repo.
+**Nothing is written to disk but preferences.** No database, no log, no export. If you
+find yourself adding one, that is a product decision and not an implementation detail.
 
 ## Decisions already made — don't relitigate without a reason
 
-- **Detection is bundle ID + Accessibility window title.** No screen capture as a
-  baseline signal.
-- **Use the Accessibility API, not `CGWindowListCopyWindowInfo`**, to read window titles.
-  The latter requires Screen Recording permission since macOS 10.15.
-- **No browser extension in the consumer path.** One app, one permission prompt.
-- **All classification is on-device.** The server receives anonymous counters only —
-  never a title, URL, or pixel.
-- **Interruptions are a mascot, and the mascot is also the handoff button.** A mascot
-  that only nags gets muted.
+- **This is a launcher, not an observer.** The detection layer, the rules engine, the
+  personaliser and the local log were removed on purpose after four weeks of evidence.
+  They are in the git history. See `NOTES.md` before proposing their return.
+- **No network code in the client. Not stubbed — absent.**
+- **Never auto-submit** a handoff. The user reads what is about to be sent.
+- **A window is identified three ways** — lone window, unique title, same rectangle —
+  because the Accessibility API and ScreenCaptureKit disagree about titles.
+- **Only restore a clipboard you still own.** A restore is a write.
 - **The mascot is Doug — a hermit crab in a dead CRT, and the screen is his face.**
-  Original character by design, which also settles the Desktop Goose trade-dress problem
-  in `docs/04`. `Doug.dc.html` is the source of truth for how he looks; `DougSprite.swift`
-  copies its pixel grids verbatim rather than exporting images, so the two can't drift.
+  Original character by design. `Doug.dc.html` is the source of truth for how he looks;
+  `DougSprite.swift` copies its pixel grids verbatim rather than exporting images, so the
+  two can't drift. The icon is generated from the same sprite.
 - **Native Swift, distributed outside the Mac App Store.** The sandbox forbids the
   Accessibility API this depends on.
 - **SwiftPM, not an `.xcodeproj`.** Command Line Tools build, sign, notarise and staple
-  without Xcode. Not a one-way door — a package opens in Xcode directly.
-- **The rulebook is generic; personalisation is separate and on-device.** See `NOTES.md`.
-- **Never auto-submit** a handoff. The user reads what's about to be sent.
-- **The north star is accepted interruptions, never interruptions fired.**
+  without Xcode.
 
 ## Conventions
 
-- Specs live in `docs/`, numbered. A stale spec is worse than none.
 - ⚠️ marks an unvalidated assumption or a decision needing external verification.
   Preserve the marker until it's actually resolved.
-- No network code in the client target. Not stubbed — absent, until Phase 2.
 - **Three files, three jobs.** `CLAUDE.md` routes and rarely changes. `HANDOFF.md` is
   rewritten each session and is the only description of the present. `NOTES.md` is
-  appended to and explains why. Putting the wrong thing in the wrong one is how these
-  rot.
+  appended to and explains why.
 - `AGENTS.md` is a generated mirror of this file. Edit `CLAUDE.md`, then copy it across
   with the header line swapped.

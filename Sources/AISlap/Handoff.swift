@@ -29,14 +29,20 @@ final class Handoff {
         }
     }
 
-    enum ReviewChoice: Equatable { case includeImage, textOnly, cancel, permission }
+    /// What the review came back with. The prompt travels with the choice because the
+    /// user can rewrite it there — the canned line is a starting point, not the message.
+    enum ReviewChoice: Equatable {
+        case send(prompt: String, includeImage: Bool)
+        case cancel
+        case permission
+    }
 
     /// All external effects are injected so focus, clipboard and cancellation races
     /// can be tested without capturing the user's screen or sending any keystrokes.
     struct Environment {
         var hasScreenPermission: @MainActor () -> Bool = { WindowCapture.hasPermission }
         var capture: @MainActor (Target) async -> CGImage? = { await WindowCapture.capture(pid: $0.pid, title: $0.title) }
-        var review: @MainActor (CGImage?, Bool) -> ReviewChoice = { HandoffRecovery.review(image: $0, hasPermission: $1) }
+        var review: @MainActor (CGImage?, Bool, String) -> ReviewChoice = { HandoffRecovery.review(image: $0, hasPermission: $1, prompt: $2) }
         var requestPermission: @MainActor () -> Void = {
             _ = WindowCapture.requestPermission()
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
@@ -131,25 +137,28 @@ final class Handoff {
             let granted = env.hasScreenPermission()
             let captured = granted ? await env.capture(target) : nil
             guard current() else { return }
-            let choice = env.review(captured, granted)
+            let choice = env.review(captured, granted, target.prompt)
             guard current() else { return }
+            let prompt: String
+            let image: CGImage?
             switch choice {
             case .cancel: finish(.cancelled); return
             case .permission:
                 env.requestPermission()
                 finish(.needsScreenRecording); return
-            default: break
+            case .send(let typed, let includeImage):
+                prompt = typed
+                image = includeImage ? captured : nil
             }
-            let image = choice == .includeImage ? captured : nil
             // Snapshot before opening: a user copy during a cold launch must win.
             let staged = env.stage()
             activeClipboard = staged
             @MainActor func manual(_ reason: String) {
                 guard current() else { return }
-                let copied = staged.put(text: target.prompt)
+                let copied = staged.put(text: prompt)
                 let message = copied ? "Prompt copied. Click the AI composer and press ⌘V. \(reason)"
                     : "Your newer clipboard was kept. Use Copy prompt below. \(reason)"
-                env.recover(target.prompt, image, message)
+                env.recover(prompt, image, message)
                 finish(.clipboardOnly(reason: reason))
             }
             guard let opened = await env.open(destination) else {
@@ -192,7 +201,7 @@ final class Handoff {
                 await env.sleep(0.7)
             }
             guard current() else { return }
-            guard canSend(), env.editable(opened.pid), staged.put(text: target.prompt),
+            guard canSend(), env.editable(opened.pid), staged.put(text: prompt),
                   canSend(), env.press(9, .maskCommand, opened.pid) else {
                 manual("Automatic paste stopped. You can finish it manually."); return
             }

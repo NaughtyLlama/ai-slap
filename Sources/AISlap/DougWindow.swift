@@ -198,7 +198,7 @@ final class DougWindow {
 
     private var tier: Tier = .ambient
     private var moodOverride: Doug.Mood?
-    private var isHidden = false
+    private(set) var isHidden = false
     private var isDragging = false
     private var phase = 0
     private var direction: CGFloat = -1

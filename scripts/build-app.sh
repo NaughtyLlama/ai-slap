@@ -47,9 +47,10 @@ rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp ".build/release/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "${APP}/Contents/Info.plist"
-# The baked-in default rulebook. docs/03 makes this a remote signed artifact in
-# Phase 2; until then it ships in the bundle so a first run with no network works.
-cp "Resources/rulebook.json" "${APP}/Contents/Resources/rulebook.json"
+# Where handoffs can go. A file rather than compiled in, so a vendor renaming an app
+# is an edit rather than a new build.
+cp "Resources/destinations.json" "${APP}/Contents/Resources/destinations.json"
+cp "Resources/AISlap.icns" "${APP}/Contents/Resources/AISlap.icns"
 
 echo "==> Signing with identity: ${SIGN_IDENTITY}"
 codesign --force --options runtime --sign "${SIGN_IDENTITY}" "${APP}"

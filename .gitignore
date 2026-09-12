@@ -12,3 +12,6 @@ Package.resolved
 .env
 .env.local
 node_modules/
+
+# Built for sharing; regenerate with scripts/package.sh
+dist/

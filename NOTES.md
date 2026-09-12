@@ -686,3 +686,84 @@ framework message does. Worth replacing with `os.Logger` and an explicit subsyst
 relying on app logs again. What worked instead: filtering the app's log for ScreenCaptureKit
 entries, reading the `frame=` on the `SCWindow` it selected, and matching that against a
 live window dump.
+
+---
+
+## The product was the launcher all along
+
+Four weeks of the author's own data, with idle time stripped out:
+
+| | |
+|---|---|
+| Time already inside an AI app | 46.7 hours, 59% |
+| Everywhere else | 32.1 hours, 41% |
+| Interruptions fired | 31 |
+| Accepted | 3, one every nine days |
+
+And the 41% was mostly browsers, Slack, Messages and Zoom — reading and talking, not
+manual work waiting to be handed off. The detection layer was hunting for a moment that
+rarely happened to the only person running it.
+
+**The tell was the text-only prompt.** Chen's words: "it just says here's what I'm
+working on, can you help? What's the point of that at all?" He was right, and the reason
+was structural rather than a copywriting miss. Every prompt in the app was written
+assuming a picture was attached. Strip the screenshot and each one becomes a sentence
+about something the AI cannot see.
+
+Which exposes the ceiling: **everything the app knew about your work was an app name and
+a window title.** The nudge copy was generic because the classifier only knew "a
+document". The prompt was generic for the same reason. The screenshot was carrying the
+entire payload, and the app never understood it — it only forwarded it.
+
+So detection was the trigger and the screenshot was the product. Once that is true, the
+rules engine, the personaliser, the log, and every piece of privacy machinery built to
+protect that log are all scaffolding around a thing that was never load-bearing. About
+3,000 lines came out.
+
+**The generalisable part:** when a feature's output is hollow, check whether the hollowness
+is a bug in that feature or a report on how much the system actually knows. A canned
+prompt with nothing in it was the second kind, and no amount of rewriting the line would
+have fixed it.
+
+### Privacy machinery is a function of what you keep
+
+The removed version had migration code, `secure_delete`, `VACUUM`, retention windows, an
+export, a delete-all that cleared nine different things, and a spec section arguing about
+which of them counted as personal data. All of it was real and all of it existed because
+the app kept a log.
+
+Keeping nothing deleted the entire category. There is no retention setting now because
+there is no retention, no delete button because there is nothing to delete, and no
+argument about window titles because none are written down. **The cheapest privacy
+control is not collecting it**, and that is a product decision rather than an engineering
+one — which is why it sat unexamined for months while the engineering around it got more
+elaborate.
+
+### An app for other people needs things an app for yourself never did
+
+Shipping the same binary to ten strangers surfaced work that four weeks of solo use never
+did, none of it clever:
+
+- **A first run that explains itself.** A menu-bar app needing two system permissions
+  before it can do anything is the easiest kind to give up on — it launches, shows an
+  icon, and appears broken.
+- **An icon.** It had been running with the blank placeholder for months, and nobody
+  noticed because the author never looked at the Dock. Generating it from `DougSprite`
+  rather than drawing one keeps it from drifting from the character, the same argument
+  the sprite already makes against exporting PNGs.
+- **A note for the recipient**, because an unsigned app is refused by Gatekeeper with a
+  message that sounds like a virus warning and is actually a statement about a
+  certificate.
+- **The $99 Developer ID**, which is now the whole distance between working and
+  shareable.
+
+### ⚠️ You cannot check your own UI on a sleeping Mac
+
+This session built a new onboarding flow, a new dialog and a new menu, and saw none of
+them. The display was asleep: `screencapture` returns pure black, and ScreenCaptureKit
+refuses to composite individual windows.
+
+What still worked was asking the window server what the app had open — two windows, one
+390×372 and one 100×68, which is an alert and a crab. That proves it launched, did not
+crash, and put the right things on screen. It proves nothing about whether they look
+right. Worth knowing the difference before reporting either one.
