@@ -61,8 +61,6 @@ scripts/design-preview.sh              renders Doug offscreen, to a PNG
 Doug.dc.html                           the design canvas — the source for the sprite
 ```
 
-- `parking-lot.md` — important but not right now. Deferred asks, dated, with who raised them. Check it before asking Chen what's next; add to it instead of losing an idea.
-
 ```bash
 ./scripts/build-app.sh --run
 ```
