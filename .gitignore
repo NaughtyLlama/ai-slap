@@ -15,3 +15,6 @@ node_modules/
 
 # Built for sharing; regenerate with scripts/package.sh
 dist/
+
+# Session artifacts — yours, and they stay on your machine
+outputs/
