@@ -70,7 +70,7 @@ fi
 cp "Resources/Info.plist" "${APP}/Contents/Info.plist"
 # Where handoffs can go. A file rather than compiled in, so a vendor renaming an app
 # is an edit rather than a new build.
-cp "Resources/destinations.json" "${APP}/Contents/Resources/destinations.json"
+cp "Resources/rulebook.json" "${APP}/Contents/Resources/rulebook.json"
 cp "Resources/AISlap.icns" "${APP}/Contents/Resources/AISlap.icns"
 
 # SwiftPM release binaries include debug-map paths to the build machine.

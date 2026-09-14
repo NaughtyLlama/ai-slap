@@ -103,6 +103,17 @@ enum Onboarding {
             AI-slap never submits the chat or saves a screenshot history. Your chosen AI \
             receives anything you paste; its privacy settings apply.
 
+            IT ALSO WATCHES WHICH WINDOW YOU'RE IN. If you've been stuck on the same \
+            email or document for a while and haven't touched AI recently, Doug will \
+            suggest handing it over. A handful of times a day at most, never while \
+            you're on a call, never at night.
+
+            That watching reads the name of your frontmost window to tell an email from \
+            a spreadsheet. It is kept in memory, never written to disk, and gone when \
+            you quit. There is no history, no learning, and nothing leaves your Mac. \
+            Switch it off any time under "Watch and nudge me", or silence it for a \
+            few hours with "Quiet for a while".
+
             Doug the hermit crab lives on your desktop. Drag him where you like. \
             Double-click him to hand off without touching the keyboard.
             """

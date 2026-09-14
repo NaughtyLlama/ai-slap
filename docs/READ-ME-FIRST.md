@@ -4,6 +4,16 @@ Press **⌥Space** to capture the window you're using, review the picture, and h
 an AI. Doug, the hermit crab on your desktop, does the same thing when double-clicked.
 AI-slap never submits the chat for you.
 
+**It also watches which window you're in.** If you've been stuck on the same email or
+document for a while and haven't touched AI recently, Doug suggests handing it over. A
+few times a day at most, never during a call, never at night. Switch it off under
+**Watch and nudge me** in the menu, or silence it for a few hours with **Quiet for a
+while**.
+
+That watching reads the name of your frontmost window, enough to tell an email from a
+spreadsheet. It stays in memory, is never written to disk, and is gone when you quit.
+No history, no learning, nothing leaves your Mac.
+
 ## Before downloading
 
 - **Intel or Apple Silicon Mac, macOS 14+.** Check Apple menu → About This Mac.

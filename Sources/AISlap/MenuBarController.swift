@@ -9,6 +9,9 @@ final class MenuBarController: NSObject {
     private let handoffStatusItem = NSMenuItem()
     private let destinationItem = NSMenuItem()
     private let reviewItem = NSMenuItem()
+    private let nudgeItem = NSMenuItem()
+    private let snoozeItem = NSMenuItem()
+    private let nudgeStatusItem = NSMenuItem()
     private let mascotItem = NSMenuItem()
     private let calmItem = NSMenuItem()
     private let hideDougItem = NSMenuItem()
@@ -24,6 +27,9 @@ final class MenuBarController: NSObject {
     private let onToggleLaunchAtLogin: () -> Void
     private let onFixPermission: () -> Void
     private let onShowWelcome: () -> Void
+    private let onToggleNudges: () -> Void
+    private let onSnooze: (Int) -> Void
+    private let onCancelSnooze: () -> Void
     private let lastHandoff: () -> String?
 
     init(
@@ -35,6 +41,9 @@ final class MenuBarController: NSObject {
         onToggleLaunchAtLogin: @escaping () -> Void,
         onFixPermission: @escaping () -> Void,
         onShowWelcome: @escaping () -> Void,
+        onToggleNudges: @escaping () -> Void,
+        onSnooze: @escaping (Int) -> Void,
+        onCancelSnooze: @escaping () -> Void,
         lastHandoff: @escaping () -> String?
     ) {
         self.onHandoffNow = onHandoffNow
@@ -45,6 +54,9 @@ final class MenuBarController: NSObject {
         self.onToggleLaunchAtLogin = onToggleLaunchAtLogin
         self.onFixPermission = onFixPermission
         self.onShowWelcome = onShowWelcome
+        self.onToggleNudges = onToggleNudges
+        self.onSnooze = onSnooze
+        self.onCancelSnooze = onCancelSnooze
         self.lastHandoff = lastHandoff
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -74,6 +86,34 @@ final class MenuBarController: NSObject {
         reviewItem.target = self
         reviewItem.action = #selector(toggleReview)
         menu.addItem(reviewItem)
+
+        menu.addItem(.separator())
+
+        nudgeItem.title = "Watch and nudge me"
+        nudgeItem.target = self
+        nudgeItem.action = #selector(toggleNudges)
+        menu.addItem(nudgeItem)
+
+        nudgeStatusItem.isEnabled = false
+        menu.addItem(nudgeStatusItem)
+
+        snoozeItem.title = "Quiet for a while"
+        let snoozeMenu = NSMenu()
+        for minutes in [30, 60, 180] {
+            let item = NSMenuItem(
+                title: minutes < 60 ? "\(minutes) minutes" : "\(minutes / 60) hour\(minutes > 60 ? "s" : "")",
+                action: #selector(snooze(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = minutes
+            snoozeMenu.addItem(item)
+        }
+        snoozeMenu.addItem(.separator())
+        let wakeItem = NSMenuItem(title: "Never mind, carry on", action: #selector(cancelSnooze), keyEquivalent: "")
+        wakeItem.target = self
+        snoozeMenu.addItem(wakeItem)
+        snoozeItem.submenu = snoozeMenu
+        menu.addItem(snoozeItem)
 
         menu.addItem(.separator())
 
@@ -133,6 +173,8 @@ final class MenuBarController: NSObject {
         hasAccessibility: Bool,
         hasScreenRecording: Bool,
         hotkeyRegistered: Bool,
+        nudgesEnabled: Bool,
+        nudgeStatus: String,
         mascotEnabled: Bool,
         calmMode: Bool,
         dougHidden: Bool,
@@ -158,6 +200,9 @@ final class MenuBarController: NSObject {
 
         rebuildDestinations()
         reviewItem.state = HandoffRecovery.preference == .ask ? .on : .off
+        nudgeItem.state = nudgesEnabled ? .on : .off
+        nudgeStatusItem.title = nudgeStatus
+        snoozeItem.isEnabled = nudgesEnabled
         mascotItem.state = mascotEnabled ? .on : .off
         calmItem.state = calmMode ? .on : .off
         hideDougItem.title = dougHidden ? "Hidden — ⌥⌘G to bring him back" : "Hide him now (⌥⌘G)"
@@ -219,6 +264,13 @@ final class MenuBarController: NSObject {
     @objc private func toggleLaunchAtLogin() { onToggleLaunchAtLogin() }
     @objc private func fixPermission() { onFixPermission() }
     @objc private func showWelcome() { onShowWelcome() }
+    @objc private func toggleNudges() { onToggleNudges() }
+    @objc private func cancelSnooze() { onCancelSnooze() }
+
+    @objc private func snooze(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        onSnooze(minutes)
+    }
 
     @objc private func setDestination(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
