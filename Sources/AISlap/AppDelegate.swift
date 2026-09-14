@@ -147,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// yet. Tier 1 is the whole bet of the product — he stops and turns to face your
     /// window, costing one repaint and no attention at all.
     private func tick() {
+        // Hiding him lasts until you bring him back, or until the day turns over. When
+        // it does turn over, the crab and the silence have to lift together: an expiry
+        // that lifted only the silence is what used to put a speech bubble on a shared
+        // screen with nothing underneath it.
+        if doug.isHidden, engine?.suppression.isPanicked == false {
+            doug.unhide()
+            refresh()
+        }
         engine?.tick()
         guard let progress = engine?.dwellProgress() else {
             if !nudgePanel.isShowing { doug.reset() }

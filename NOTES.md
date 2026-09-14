@@ -840,3 +840,78 @@ time, the real defaults — has to be injectable, or the test suite passes and f
 weather. The mutation run caught a second instance of the same family: a test that claimed
 to cover "only mention a window once" was actually passing because the rule's cooldown was
 still running. Breaking the gate it named did not fail it. It ticks past the cooldown now.
+
+## 2026-09-14 — three promises about silence, and what a grace window is for
+
+Review found three more places where the app's behaviour and its description had come
+apart. Two were fixed; the third was a promise that could not be kept, so the promise
+changed instead. All three reproduce as tests before the fix, and every fix was then
+broken again to confirm the test noticed.
+
+### Nudging you inside the AI itself
+
+Sit in a Claude window for half an hour and `surface.grind` fires, telling you to try
+using AI.
+
+The only defence was `noAiContextForMs`, a grace window measured from the moment an AI
+context was **seen**. That is the right idea for the minutes *after* you leave, and
+exactly backwards while you are still there: the grace starts when you arrive, so the
+longer you actually work in the AI, the more expired your amnesty becomes. Thirty minutes
+in, a rule that fires on time totalled across the day looks at a surface with thirty
+banked minutes and a grace that lapsed twenty minutes ago, and everything it can see says
+"stuck, and not using AI".
+
+The fix is a flat gate — `isAIContext(context)` blocks every rule, before any condition is
+consulted — rather than a longer grace. **A grace window forgives a lapse. Being here now
+is not a lapse.** Those are different questions and the code was only asking one of them.
+
+Worth keeping: the native-client case was *already* blocked before the fix, but only by
+accident. `surface.grind` is browser-only and `surface.returns` wants twelve visits, so no
+rule happened to reach a Claude.app window — and that luck evaporates the moment anyone
+switches on `timer.checkin`, which matches anything. The test for it asserts on the
+**reason** the gate gave, not on the fact that it closed, because a gate that closes for
+the wrong reason is a gate that will open again.
+
+### Hiding him for a screen share expired after thirty minutes
+
+⌥⌘G hid Doug and suppressed nudges for half an hour. Doug stayed hidden; the suppression
+did not. A demo, a workshop or a recorded walkthrough runs longer than thirty minutes, so
+the failure was a speech bubble arriving on a shared screen with **no crab underneath it**
+to explain what it was — the exact accident the shortcut exists to prevent, arriving half
+an hour late.
+
+Hiding now lasts until you press ⌥⌘G again. The one thing that lifts it on its own is the
+day turning over, so that hiding him on Monday and forgetting is not the same as
+uninstalling — and the crab comes back at that same moment, because `AppDelegate.tick()`
+reads `isPanicked` and unhides when it goes false. **Two states that must agree should be
+derived from one, not set in two places and expired on separate clocks.** That is the
+whole bug in one line.
+
+### "Never during calls" was never true, so it stopped being claimed
+
+The microphone check is real and it is good: `kAudioDevicePropertyDeviceIsRunningSomewhere`
+on the default input device, no permission, no prompt, and it survives switching away from
+the call app to take notes. It is not call detection. It sees **the default input device
+only**, so a meeting on a second interface, a headset that isn't the system default, or a
+session you are only listening to all walk straight past it. Camera state is still
+unchecked.
+
+Building real call detection is a project. Saying so is a sentence. The onboarding, the
+README and the recipient's guide now say he goes quiet while the microphone is in use and
+while a call app is in front, that this covers most meetings and not all of them, and that
+**⌥⌘G before you present is the actual answer** — the automatic part is a safety net. The
+stale "GAP: microphone not checked yet" comment in the rulebook, which had been true and
+was no longer, now describes what the check does and does not see.
+
+**The pattern across all three:** every one of these was a *description* problem wearing a
+bug's clothes. Two were fixed by making the code match the promise. The third was fixed by
+making the promise match the code, which is the right move whenever the gap is a project
+rather than an afternoon — and is only dishonest if you leave it unsaid.
+
+### Still not covered by a test
+
+`AppDelegate.tick()` bringing Doug back when the overnight hide lapses. Nothing in the
+suite touches `AppDelegate` — it is NSApplication-bound throughout — and the behaviour
+only happens at a real midnight, so it is verified by reading and by the `Suppression`
+tests underneath it, not by running it. If that wiring is ever moved, move it somewhere
+testable.

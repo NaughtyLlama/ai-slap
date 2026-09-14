@@ -11,7 +11,9 @@ Double-click him to start a handoff. **⌥⌘G** hides him before a screen share
 
 **It watches which window you're in, lightly.** Stuck on the same document for a while
 with no recent AI use, and Doug suggests handing it over. Fixed rules, a few times a day
-at most, nothing during calls or at night. Window names stay in memory, are never written
+at most, nothing at night, and nothing while you're already in an AI app. He also goes
+quiet while your microphone is in use or a call app is in front — enough for most
+meetings, but **press ⌥⌘G before you present**, which hides him until you bring him back. Window names stay in memory, are never written
 to disk, and go when you quit — there is no history and nothing that learns.
 
 **[Download the latest release](https://github.com/NaughtyLlama/ai-slap/releases/latest)**

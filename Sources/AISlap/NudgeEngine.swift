@@ -218,6 +218,16 @@ final class NudgeEngine {
         let verdict = suppressionCheck()
         if verdict.suppressed { return .blocked(verdict.reason ?? "suppressed") }
 
+        // Never, under any rule, inside the AI itself.
+        //
+        // This used to be handled entirely by `noAiContextForMs`, a grace window
+        // measured from the moment an AI context was *seen*. That gets the sign
+        // backwards while you are still sitting in one: the longer you work in Claude,
+        // the more expired your amnesty becomes, until `surface.grind` notices half an
+        // hour banked on a surface and suggests you try using AI. A grace window is for
+        // the minutes *after* you leave. Being here now is not a lapse to forgive.
+        if isAIContext(context) { return .blocked("you're in the AI right now") }
+
         let now = now()
         let hour = Calendar.current.component(.hour, from: now)
         let quiet = quietHours.start > quietHours.end

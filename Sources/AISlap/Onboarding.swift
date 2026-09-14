@@ -105,8 +105,13 @@ enum Onboarding {
 
             IT ALSO WATCHES WHICH WINDOW YOU'RE IN. If you've been stuck on the same \
             email or document for a while and haven't touched AI recently, Doug will \
-            suggest handing it over. A handful of times a day at most, never while \
-            you're on a call, never at night.
+            suggest handing it over. A handful of times a day at most, never at night, \
+            and never while you're already in an AI app.
+
+            HE TRIES TO STAY QUIET DURING CALLS. He goes silent while your microphone \
+            is in use and while a call app is in front, which covers most meetings but \
+            not all of them. Before you present, press ⌥⌘G — that hides him and stops \
+            every nudge until you press it again.
 
             That watching reads the name of your frontmost window to tell an email from \
             a spreadsheet. It is kept in memory, never written to disk, and gone when \

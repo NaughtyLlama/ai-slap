@@ -6,9 +6,16 @@ AI-slap never submits the chat for you.
 
 **It also watches which window you're in.** If you've been stuck on the same email or
 document for a while and haven't touched AI recently, Doug suggests handing it over. A
-few times a day at most, never while your microphone is in use, never at night. Switch it off under
-**Watch and nudge me** in the menu, or silence it for a few hours with **Quiet for a
-while**.
+few times a day at most, never at night, and never while you're already in an AI app.
+Switch it off under **Watch and nudge me** in the menu, or silence it for a few hours
+with **Quiet for a while**.
+
+**Before you present, press ⌥⌘G.** Doug disappears and every nudge stops until you press
+it again. He does try to stay quiet on his own — he goes silent while your microphone is
+in use, for two minutes after it stops, and while a call app is in front. That covers
+most meetings. It does not cover a meeting you're only listening to, one on a headset
+that isn't your Mac's default microphone, or a screen recording with no audio. Treat the
+automatic part as a safety net and the shortcut as the actual answer.
 
 That watching reads the name of your frontmost window, enough to tell an email from a
 spreadsheet. It stays in memory, is never written to disk, and is gone when you quit.
@@ -70,7 +77,7 @@ The recovery panel expires after five minutes. If sign-in takes longer, run a ne
 | ⌥Space | Capture and review the current window |
 | Double-click Doug | Start the same handoff |
 | Drag Doug | Move him |
-| ⌥⌘G | Hide or show Doug, including before a screen share |
+| ⌥⌘G | Hide Doug and silence every nudge until you press it again |
 | Menu bar → Send it to | Change AI destination |
 | Menu bar → Set up AI-slap… | Revisit destination and permission setup |
 | Menu bar → Ask me before sending | Restore the preview after “Don't ask again” |

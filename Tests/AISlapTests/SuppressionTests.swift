@@ -79,6 +79,44 @@ final class SuppressionTests: XCTestCase {
         XCTAssertFalse(s.check().suppressed, "and bringing him back must undo it")
     }
 
+    /// Hiding him for a screen share used to wear off after thirty minutes while the
+    /// crab stayed hidden. A long demo therefore ended with a speech bubble on the
+    /// shared screen and no visible mascot to explain it — the exact accident the
+    /// shortcut exists to prevent, arriving half an hour late.
+    func testHidingLastsUntilYouBringHimBack() {
+        var t: TimeInterval = 0
+        let s = make(mic: { false },
+                     frontmost: { ("com.example.doc", "Writer") },
+                     clock: { self.noon(t) })
+
+        s.panic()
+        t = 31 * 60
+        XCTAssertTrue(s.check().suppressed, "a demo can run longer than half an hour")
+        t = 3 * 3_600
+        XCTAssertTrue(s.check().suppressed, "and longer than that")
+        XCTAssertTrue(s.isPanicked)
+
+        s.cancelPanic()
+        XCTAssertFalse(s.check().suppressed)
+    }
+
+    /// The one thing that does lift it on its own. Hidden on Monday and forgotten is an
+    /// app that silently does nothing forever, so the hide lapses at the end of the day
+    /// — and the crab comes back with it, which is what keeps the two from disagreeing.
+    func testAForgottenHideLapsesOvernight() {
+        var t: TimeInterval = 0
+        let s = make(mic: { false },
+                     frontmost: { ("com.example.doc", "Writer") },
+                     clock: { self.noon(t) })
+
+        s.panic()
+        let tomorrow = Calendar.current.startOfDay(for: noon())
+            .addingTimeInterval(86_400 + 3_600)
+        t = tomorrow.timeIntervalSince(noon())
+        XCTAssertFalse(s.check().suppressed, "a new day starts him visible")
+        XCTAssertFalse(s.isPanicked, "and the menu must agree with the check")
+    }
+
     func testACallAppInFrontBeforeAnyoneUnmutesStillCounts() {
         let s = make(mic: { false },
                      frontmost: { ("us.zoom.xos", "zoom.us") },

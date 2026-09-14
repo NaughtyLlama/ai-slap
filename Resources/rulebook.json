@@ -62,9 +62,11 @@
       "hiding \u2014 hiding when you didn't need to costs nothing, failing to hide once",
       "costs the account.",
       "",
-      "GAP: camera/microphone in-use state is not checked yet. It is the other half of",
-      "the docs/04 detection and should be added deliberately, since touching",
-      "AVCaptureDevice can surface a permission prompt of its own."
+      "The microphone IS now checked, via CoreAudio rather than AVCaptureDevice, so no",
+      "permission prompt is involved. It only sees the DEFAULT input device, so a",
+      "meeting on a second interface, or one you are only listening to, still escapes",
+      "it. The hide shortcut is the real answer and the docs say so; this list and the",
+      "microphone are a safety net, not a guarantee. Camera state is still unchecked."
     ],
     "conferencingBundleIds": [
       "us.zoom.xos",

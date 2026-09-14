@@ -128,6 +128,77 @@ final class RulebookCoverageTests: XCTestCase {
                        "progress must track the rule that will fire, not a blocked one")
     }
 
+    /// The nudge the product must never send.
+    ///
+    /// The only AI check was a grace window measured from the moment you *arrived* in
+    /// the AI, so the longer you actually worked there the more expired that grace
+    /// became. Half an hour into a Claude window, `surface.grind` — which fires on time
+    /// totalled across the day and deliberately claims any surface no other rule
+    /// wants — looks at a surface with thirty banked minutes and a grace that lapsed
+    /// twenty minutes ago, and tells you to try using AI.
+    func testItNeverNudgesYouInsideTheAIItself() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+        var fired: [String] = []
+        engine.onNudge = { _, _, ruleID in fired.append(ruleID) }
+
+        let claude = WindowContext(bundleID: "com.google.Chrome",
+                                   appName: "Google Chrome", title: "Claude")
+        XCTAssertTrue(engine.isAIContext(claude),
+                      "the whole test depends on this window being recognised as AI")
+
+        engine.contextChanged(to: claude)
+        for minute in 1...30 {
+            t = TimeInterval(minute) * 60
+            engine.tick()
+        }
+        XCTAssertEqual(fired, [],
+                       "told to use AI while using AI: \(fired)")
+    }
+
+    /// Not even the cheap tier. Doug turning to face a Claude window is the same
+    /// accusation in a quieter voice, and it is the tell that the gate is only
+    /// half-closed. The browser window is the one that can prove it: `surface.grind`
+    /// really is a live candidate there, and really does pass its gates at half an hour.
+    func testDougDoesNotLookUpInsideTheAIEither() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+
+        let claude = WindowContext(bundleID: "com.google.Chrome",
+                                   appName: "Google Chrome", title: "Claude")
+        engine.contextChanged(to: claude)
+        t = 1_800
+        XCTAssertNil(engine.dwellProgress(),
+                     "nothing is being waited on when you are already in the AI")
+    }
+
+    /// A native AI client is blocked today only because no rule happens to reach it —
+    /// `surface.grind` is browser-only and `surface.returns` wants twelve visits. That
+    /// is luck, not a decision, and it evaporates the moment a rule like `timer.checkin`
+    /// is switched on. So the assertion is on *why* it was blocked.
+    func testTheNativeAIClientIsBlockedOnPurposeAndNotByAccident() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+
+        let claude = WindowContext(bundleID: "com.anthropic.claudefordesktop",
+                                   appName: "Claude", title: "Untitled")
+        engine.contextChanged(to: claude)
+        t = 1_800
+        let anyRule = try XCTUnwrap(engine.candidates(for: claude).first)
+        guard case .blocked(let why) = engine.gate(anyRule, context: claude) else {
+            return XCTFail("\(anyRule.id) would fire inside the AI client itself")
+        }
+        XCTAssertTrue(why.lowercased().contains("ai"),
+                      "blocked for the wrong reason — \"\(why)\" is a condition that "
+                      + "failed, not a decision that this is the AI")
+    }
+
     /// Turning the watching off has to drop what was being held about today, not just
     /// stop mentioning it. The accumulation rule is the honest test: it fires on time
     /// totalled across the day, so if forgetting works, its gate closes again.

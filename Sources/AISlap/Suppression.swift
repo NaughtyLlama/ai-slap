@@ -10,7 +10,7 @@ import CoreAudio
 final class Suppression {
 
     private let conferencingBundleIDs: Set<String>
-    private var panicUntil: Date?
+    private var hiddenSince: Date?
     private var screenIsLocked = false
     private var lastMicUse: Date?
     /// Long enough to cover "let me just write that down", short enough not to eat the
@@ -50,9 +50,18 @@ final class Suppression {
         return running != 0
     }
 
-    /// docs/04: the panic hotkey hides everything for half an hour. Users need to trust
-    /// they can make it vanish in one keystroke or they won't run it at all.
-    static let panicDuration: TimeInterval = 30 * 60
+    /// docs/04: the panic hotkey has to make everything vanish in one keystroke, or
+    /// people won't run the app at all.
+    ///
+    /// It used to wear off after thirty minutes. That put an expiry on the one promise
+    /// here that has to be unconditional: a demo, a workshop, a recorded walkthrough
+    /// can all run longer than half an hour, and the failure looked like a speech
+    /// bubble arriving on a shared screen with no crab beside it to explain it. So
+    /// hiding lasts until it is undone — with one exception, below, so that hiding him
+    /// on Monday and forgetting is not the same as uninstalling.
+    static func lapse(after hidden: Date) -> Date {
+        Calendar.current.startOfDay(for: hidden).addingTimeInterval(86_400)
+    }
 
     init(conferencingBundleIDs: [String]) {
         self.conferencingBundleIDs = Set(conferencingBundleIDs)
@@ -65,9 +74,8 @@ final class Suppression {
     }
 
     func check() -> Verdict {
-        if let panicUntil, now() < panicUntil {
-            let minutes = Int(panicUntil.timeIntervalSinceNow / 60) + 1
-            return Verdict(suppressed: true, reason: "hidden for another \(minutes)m")
+        if isPanicked {
+            return Verdict(suppressed: true, reason: "hidden until you bring him back")
         }
         if screenIsLocked {
             return Verdict(suppressed: true, reason: "screen locked")
@@ -101,16 +109,20 @@ final class Suppression {
     }
 
     func panic() {
-        panicUntil = now().addingTimeInterval(Self.panicDuration)
+        hiddenSince = now()
     }
 
     func cancelPanic() {
-        panicUntil = nil
+        hiddenSince = nil
     }
 
+    /// True for as long as he should stay hidden. The overnight lapse is the only thing
+    /// that lifts this on its own, and the app brings the crab back at the same moment
+    /// — the two states are read from here so they cannot drift apart, which is how the
+    /// old expiry produced a bubble with nothing under it.
     var isPanicked: Bool {
-        guard let panicUntil else { return false }
-        return now() < panicUntil
+        guard let hiddenSince else { return false }
+        return now() < Self.lapse(after: hiddenSince)
     }
 
     private func observeScreenLock() {
