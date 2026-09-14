@@ -39,6 +39,12 @@ Sources/AISlap/
   main.swift                           NSApplication bootstrap, .accessory policy
   AppDelegate.swift                    wiring: hotkeys, menu, Doug, handoff results
   Onboarding.swift                     first run — what it does, which AI, two permissions
+  WindowContext.swift                  the observed-context type
+  WindowContextObserver.swift          which app and window is frontmost
+  Rulebook.swift                       rule schema, loading, compiled matching
+  NudgeEngine.swift                    the gates — all state in memory, nothing stored
+  NudgePanel.swift                     the interruption — Doug's speech bubble
+  Suppression.swift                    when nothing may appear
   Handoff.swift                        capture → review → open → guarded paste
   HandoffRecovery.swift                the review dialog, and the rescue panel
   WindowCapture.swift                  ScreenCaptureKit, one window, three ways to find it
@@ -50,7 +56,7 @@ Sources/AISlap/
   DougSprite.swift                     the pixel grids, copied verbatim from Doug.dc.html
   DougWindow.swift                     Doug on the desktop: wandering, dragging, moods
   LaunchAtLogin.swift                  the login item
-Resources/destinations.json            where a handoff can go
+Resources/rulebook.json                rules, AI contexts, destinations, suppression
 Resources/AISlap.icns                  generated from the sprite by scripts/make-icon.sh
 Resources/Info.plist                   LSUIElement, bundle ID, version, icon
 scripts/build-app.sh                   source → AISlap.app, Command Line Tools only
@@ -71,9 +77,14 @@ content persistence is a product decision, not an implementation detail.
 
 ## Decisions already made — don't relitigate without a reason
 
-- **This is a launcher, not an observer.** The detection layer, the rules engine, the
-  personaliser and the local log were removed on purpose after four weeks of evidence.
-  They are in the git history. See `NOTES.md` before proposing their return.
+- **It watches, but it does not remember.** The observer, the nine fixed rules and
+  Doug's nudges are back. The SQLite log and the personaliser that learned from it are
+  not, and should not come back without a reason — that log was 1,900 of the old 2,700
+  lines and every piece of privacy machinery in this project existed to contain it.
+  Every rule needs only what is true right now, so all of it lives in `NudgeEngine` and
+  dies with the process. See `NOTES.md`.
+- **Fixed rules, no learning.** If a rule is wrong, edit `Resources/rulebook.json`. The
+  app will never quietly decide a rule is not for you.
 - **No network code in the client. Not stubbed — absent.**
 - **Never auto-submit** a handoff. The user reads what is about to be sent.
 - **A window is identified three ways** — lone window, unique title, same rectangle —

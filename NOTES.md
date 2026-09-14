@@ -791,3 +791,52 @@ single SwiftPM invocation works with Xcode but invokes xcbuild and fails on a ma
 with only Command Line Tools. Separate builds preserve the documented setup requirement.
 Packaging and repacking require both slices. Compilation is not an Intel runtime test;
 the release and install guide state that Intel runtime testing is pending.
+
+## Removing the nudges was a misreading, and the recovery was cheap
+
+"Let's go back to just making this an app that easily lets you take a screenshot and open
+a new chat in AI of your choice, that's it" was read as *strip to the launcher*. It meant
+*return to a lighter version of the watching*. Two days later, reading the notes, Chen
+found the detection layer gone entirely and said so.
+
+The words genuinely support both readings. What made it a mistake rather than bad luck is
+that the scope was stated back to him as a sentence inside a longer paragraph, when it was
+the largest decision in the project and should have been the question. A confirmation that
+travels in the middle of a paragraph is not a confirmation.
+
+**Everything came back from git in about an hour**, which is the argument for committing
+the deletion cleanly rather than editing files down in place. The five detection files
+restored untouched; only the engine had to be rewritten.
+
+### The log was never load-bearing, and that is why it could stay dead
+
+Rebuilding it forced the question that four weeks of running it never did: which rules
+actually needed the database? Answer, checked one rule at a time: none of them.
+
+Every condition in the book is a fact about *now*. How long you have sat here. When you
+last touched AI. How many times you have come back to this surface today. All of it fits
+in a few dictionaries on one object and dies with the process. What needed the log was the
+**personaliser** — the part that learned which rules were working for you — and that was
+1,900 of the old 2,700 lines.
+
+So the shape that came back is: watching, yes; remembering, no. Nine fixed rules, gates in
+memory, nothing written down. The new engine is 291 lines against the old 727, and every
+piece of privacy machinery this project ever built — retention windows, secure delete,
+export, delete-everything — stays deleted, because there is nothing to retain.
+
+**The generalisable bit:** a feature and its storage are not the same decision, and the
+storage is usually the expensive half. Ask what the feature needs to know rather than what
+it would be nice to have recorded. Here the honest answer was "the last ninety minutes",
+and ninety minutes fits in RAM.
+
+### A unit test that depended on what was open on the machine
+
+The first run of the engine tests failed every gate with "zoom.us is in front". `Suppression`
+asks the window server what is frontmost, so every other gate was untestable on a Mac that
+happened to be on a call. Injected alongside the clock.
+
+Worth generalising: anything that reads the live machine — the frontmost app, the current
+time, the real defaults — has to be injectable, or the test suite passes and fails with the
+weather. The mutation run caught a second instance of the same family: a test that claimed
+to cover "only mention a window once" was actually passing because the rule's cooldown was
+still running. Breaking the gate it named did not fail it. It ticks past the cooldown now.
