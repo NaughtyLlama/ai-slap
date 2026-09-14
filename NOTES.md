@@ -109,7 +109,7 @@ Each of these produced a bug that looked like something else entirely.
 - Swift's synthesised `Decodable` throws on a missing key rather than using a property
   default. Any optional rulebook field needs explicit `decodeIfPresent`.
 - Matching AI names against non-browser window titles silences the whole product: an
-  Obsidian vault called "Claude Working Folder" read as continuous AI use.
+  Obsidian vault whose window title never changed read as continuous AI use.
 - `NSPasteboard` written once with text and image makes two items, and composers read
   only the first. Paste them separately.
 - A non-activating panel never becomes key, so AppKit will not draw a default button in
@@ -667,9 +667,9 @@ test was load-bearing by hanging the suite, which is a signal, but not a pleasan
 ### Verified: position is what identified the window, on the first real try
 
 Chen's Finder test, 13:02 on 11 September. Finder had three windows open and **two of
-them were both called "BBP Certification"** — so the title test could not resolve it,
+them were both called the same thing** — so the title test could not resolve it,
 and with three windows the lone-window test did not apply. The capture succeeded anyway,
-on window 14296 at (452, 474), and not on the other "BBP Certification" at (423, 445).
+on window 14296 at (452, 474), and not on its identically named twin at (423, 445).
 
 Only the rectangle could have picked that. So the geometry test works on a real machine,
 the two APIs do agree about frames, and the belt-and-suspenders argument paid for itself
