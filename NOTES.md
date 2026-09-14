@@ -781,3 +781,13 @@ The release is explicitly Apple Silicon, includes its guide, and reports its rea
 Notarization must archive the same app after stapling: rerunning the build deletes the
 ticket. Packaging now has a notarize flow and a separate repack mode. The privacy guide
 also distinguishes app memory from clipboard copies and content received by an AI service.
+
+
+## One download for both Mac architectures
+
+Universal packaging builds arm64 and x86_64 separately, combines them with lipo, strips
+local debug paths, and then signs the resulting app. Passing both --arch flags to a
+single SwiftPM invocation works with Xcode but invokes xcbuild and fails on a machine
+with only Command Line Tools. Separate builds preserve the documented setup requirement.
+Packaging and repacking require both slices. Compilation is not an Intel runtime test;
+the release and install guide state that Intel runtime testing is pending.

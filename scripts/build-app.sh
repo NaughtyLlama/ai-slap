@@ -3,7 +3,8 @@
 # Builds AISlap.app from the SwiftPM executable. Requires only the Xcode Command
 # Line Tools.
 #
-#   ./scripts/build-app.sh            release build
+#   ./scripts/build-app.sh            release build for this Mac
+#   AISLAP_ARCH=universal ./scripts/build-app.sh   Intel + Apple Silicon
 #   ./scripts/build-app.sh --run      build, then launch from build/
 #   ./scripts/build-app.sh --install  build, copy to /Applications, launch from there
 #
@@ -40,17 +41,32 @@ else
 fi
 
 ARCH="${AISLAP_ARCH:-$(uname -m)}"
-case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac
+case "$ARCH" in
+    universal) ARCHES=(arm64 x86_64) ;;
+    arm64|x86_64) ARCHES=("$ARCH") ;;
+    *) echo "Unsupported architecture: $ARCH (use arm64, x86_64, or universal)" >&2; exit 1 ;;
+esac
 case "${1:-}" in ""|--run|--install) ;; *) echo "Usage: $0 [--run|--install]" >&2; exit 1 ;; esac
 
 echo "==> Building ${APP_NAME} (release, ${ARCH})"
-swift build -c release --arch "$ARCH"
-BIN_DIR="$(swift build -c release --arch "$ARCH" --show-bin-path)"
+# Multiple --arch flags invoke xcbuild, which requires full Xcode. Separate SwiftPM
+# builds plus lipo work with Command Line Tools alone.
+BINARIES=()
+for BUILD_ARCH in "${ARCHES[@]}"; do
+    swift build -c release --arch "$BUILD_ARCH"
+    BIN_DIR="$(swift build -c release --arch "$BUILD_ARCH" --show-bin-path)"
+    BINARIES+=("${BIN_DIR}/${APP_NAME}")
+done
 
 echo "==> Assembling ${APP}"
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
+if [[ "$ARCH" == "universal" ]]; then
+    /usr/bin/lipo -create "${BINARIES[@]}" -output "${APP}/Contents/MacOS/${APP_NAME}"
+else
+    cp "${BINARIES[0]}" "${APP}/Contents/MacOS/${APP_NAME}"
+fi
+/usr/bin/lipo "${APP}/Contents/MacOS/${APP_NAME}" -verify_arch "${ARCHES[@]}"
 cp "Resources/Info.plist" "${APP}/Contents/Info.plist"
 # Where handoffs can go. A file rather than compiled in, so a vendor renaming an app
 # is an edit rather than a new build.

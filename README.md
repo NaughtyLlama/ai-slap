@@ -10,10 +10,11 @@ Double-click him to start a handoff. **⌥⌘G** hides him before a screen share
 ## Download and run
 
 **[Download the latest release](https://github.com/NaughtyLlama/ai-slap/releases/latest)**
-→ Assets → **AISlap-apple-silicon.zip**. The older v0.2.0 asset is named AISlap.zip.
+→ Assets → **AISlap-universal.zip**.
 
-**Apple Silicon Mac (M1 or later), macOS 14+.** The prebuilt app does not run on Intel,
-Windows or Linux. Sign in to your preferred AI app or website first; AI-slap needs no API key.
+**Intel or Apple Silicon Mac, macOS 14+.** One universal download contains both
+architectures. **Intel build included; runtime testing pending.** Windows and Linux
+are unsupported. Sign in to your preferred AI app or website first; AI-slap needs no API key.
 
 Unzip, drag AISlap.app to Applications, open it, and follow setup for Accessibility and
 Screen Recording. The current beta is **not notarized**, so macOS may require a per-app
@@ -42,12 +43,14 @@ and launches it. `--run` launches from build/ instead. A locally rebuilt ad-hoc 
 need Accessibility re-granted; use `scripts/make-signing-identity.sh` for an optional
 stable local development identity.
 
-The build uses SwiftPM and the host architecture. Intel source builds are not yet
-validated on Intel hardware. The distributed beta is explicitly Apple Silicon only.
+The default source build uses your Mac's architecture. For a universal app, run
+`AISLAP_ARCH=universal ./scripts/build-app.sh`. This builds each architecture separately
+and combines them with `lipo`, so full Xcode is not required. Intel runtime behavior
+still needs testing on an Intel Mac.
 
 ```bash
 swift test
-./scripts/package.sh       # Apple Silicon beta in dist/, ad-hoc unless DEVELOPER_ID is set
+./scripts/package.sh       # Universal Mac beta in dist/, ad-hoc unless DEVELOPER_ID is set
 ```
 
 ## Package a notarized release

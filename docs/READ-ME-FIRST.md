@@ -6,8 +6,9 @@ AI-slap never submits the chat for you.
 
 ## Before downloading
 
-- **The prebuilt download requires an Apple Silicon Mac (M1 or later), macOS 14+.**
-  Check Apple menu → About This Mac. The download does not run on Intel, Windows or Linux.
+- **Intel or Apple Silicon Mac, macOS 14+.** Check Apple menu → About This Mac.
+  The universal download includes both architectures. **Intel build included; runtime
+  testing pending.** Windows and Linux are unsupported.
 - Sign in to your preferred AI app or website first. Its account requirements and charges
   apply. AI-slap itself needs no API key or account.
 - Native AI apps can receive automatic paste when their composer is detected. **Browser
@@ -16,8 +17,8 @@ AI-slap never submits the chat for you.
 ## Install
 
 1. Open [the latest release](https://github.com/NaughtyLlama/ai-slap/releases/latest).
-   Download **AISlap-apple-silicon.zip** from Assets, not “Source code.” Older v0.2.0
-   releases call it AISlap.zip; that build is also Apple Silicon only.
+   Download **AISlap-universal.zip** from Assets, not “Source code.” Versions before
+   v0.2.2 were Apple Silicon only; Intel users need v0.2.2 or later.
 2. Unzip, open the AI-slap folder, and drag **AISlap.app** into **Applications**.
 3. Open AISlap.app. A signed and notarized release opens through the normal macOS dialog.
    **The current beta is ad-hoc signed and is not notarized by Apple.** macOS may block it.
@@ -74,6 +75,11 @@ menu bar → Hand off this window.
 
 **Automatic paste doesn't work:** use the recovery panel. App versions and composer
 layouts can differ; automatic paste is attempted, not guaranteed.
+
+**Trying it on Intel:** this build compiles for Intel but has not been tested on an Intel
+Mac. Start with a harmless test note and verify permissions, the screenshot preview, and
+pasting into your AI. If a step fails, report your Mac model, macOS version, AI app or
+browser version, and which step failed. Do not include private screenshots.
 
 **After a locally rebuilt app loses Accessibility:** remove its old entry in System
 Settings → Privacy & Security → Accessibility, add the rebuilt app, and re-enable it.

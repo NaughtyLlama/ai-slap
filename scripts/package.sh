@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apple Silicon release. --notarize submits to Apple using NOTARY_PROFILE.
+# Universal Mac release (Intel + Apple Silicon). --notarize submits to Apple using NOTARY_PROFILE.
 # --repack archives an existing bundle without rebuilding or changing its signature.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,14 +16,14 @@ if [[ "$MODE" == "--notarize" ]]; then
 fi
 
 APP="build/AISlap.app"
-ZIP="dist/AISlap-apple-silicon.zip"
+ZIP="dist/AISlap-universal.zip"
 if [[ "$MODE" != "--repack" ]]; then
     # A recipient build must not accidentally use the author's local development key.
-    AISLAP_ARCH=arm64 DEVELOPER_ID="${DEVELOPER_ID:--}" ./scripts/build-app.sh
+    AISLAP_ARCH=universal DEVELOPER_ID="${DEVELOPER_ID:--}" ./scripts/build-app.sh
 fi
 codesign --verify --deep --strict "$APP"
-[[ "$(lipo -archs "$APP/Contents/MacOS/AISlap")" == "arm64" ]] || {
-    echo "This release filename requires an arm64 build." >&2; exit 1;
+/usr/bin/lipo "$APP/Contents/MacOS/AISlap" -verify_arch arm64 x86_64 || {
+    echo "Universal releases must contain both arm64 and x86_64." >&2; exit 1;
 }
 mkdir -p dist
 STAGING="$(mktemp -d)"
@@ -47,7 +47,7 @@ if [[ "$MODE" == "--notarize" ]]; then
     archive_app
 fi
 cp docs/READ-ME-FIRST.md dist/READ-ME-FIRST.md
-(cd dist && shasum -a 256 AISlap-apple-silicon.zip > SHA256SUMS.txt)
+(cd dist && shasum -a 256 AISlap-universal.zip > SHA256SUMS.txt)
 
 if /usr/sbin/spctl --assess --type execute "$APP"; then
     echo "==> Gatekeeper accepts this build."
@@ -61,4 +61,4 @@ else
     echo "!! For notarization, set DEVELOPER_ID and NOTARY_PROFILE, then run:"
     echo "!!   ./scripts/package.sh --notarize"
 fi
-echo "==> Release: $ZIP (Apple Silicon, macOS 14+)"
+echo "==> Release: $ZIP (Intel + Apple Silicon, macOS 14+; Intel runtime testing pending)"
