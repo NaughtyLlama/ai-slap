@@ -199,6 +199,47 @@ final class RulebookCoverageTests: XCTestCase {
                       + "failed, not a decision that this is the AI")
     }
 
+    /// The regression that made the whole product inert, and was invisible because its
+    /// symptom is *silence*.
+    ///
+    /// Every rule waits out a grace window since you last touched AI. Set that window
+    /// longer than the gap between someone's AI sessions and nothing can ever fire —
+    /// not one rule, not once, all day. At ten minutes, a real day of switching windows
+    /// every minute or two while using Claude every seven produced exactly zero nudges,
+    /// and the app looked switched off rather than broken.
+    ///
+    /// So this is a test about a *person*, not a rule: someone who uses AI regularly
+    /// must still be reachable. It fails the moment the grace grows past the gap.
+    func testSomeoneWhoUsesAIAllDayCanStillBeNudged() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+        var fired: [String] = []
+        engine.onNudge = { _, _, ruleID in fired.append(ruleID) }
+
+        let claude = WindowContext(bundleID: "com.anthropic.claudefordesktop",
+                                   appName: "Claude", title: "Claude")
+        let email = WindowContext(bundleID: "com.google.Chrome", appName: "Google Chrome",
+                                  title: "Re: the quote - chen@example.com - Gmail")
+
+        // Four rounds of: four minutes in Claude, then three minutes stuck on one email.
+        // Nobody in this loop goes ten minutes without AI, which is the whole point.
+        for _ in 0..<4 {
+            engine.contextChanged(to: claude)
+            let leaveAI = t + 240
+            while t < leaveAI { t += 5; engine.tick() }
+
+            engine.contextChanged(to: email)
+            let leaveEmail = t + 180
+            while t < leaveEmail { t += 5; engine.tick() }
+        }
+
+        XCTAssertFalse(fired.isEmpty,
+                       "silent for the entire day — the grace window is longer than the "
+                       + "gap between this person's AI sessions, so no rule can reach them")
+    }
+
     /// Turning the watching off has to drop what was being held about today, not just
     /// stop mentioning it. The accumulation rule is the honest test: it fires on time
     /// totalled across the day, so if forgetting works, its gate closes again.

@@ -915,3 +915,65 @@ suite touches `AppDelegate` — it is NSApplication-bound throughout — and the
 only happens at a real midnight, so it is verified by reading and by the `Suppression`
 tests underneath it, not by running it. If that wiring is ever moved, move it somewhere
 testable.
+
+## 2026-09-14, later — the app was silent all day, and that was the rulebook working
+
+Chen ran 0.3.2 for three hours of normal work and got no nudges at all. He described the
+day as bouncing between apps while using AI a lot.
+
+**It was not broken.** Replaying eight hours of exactly that shape through the shipping
+engine — switching window every 40–120 seconds, touching Claude every seven minutes —
+produced **zero** nudges. Not few. Zero, from every rule, all day.
+
+Every rule carried `noAiContextForMs: 600000`. Ten minutes since you last touched AI,
+before anything is even considered. **If someone's gap between AI sessions is shorter than
+the grace, no rule can ever fire for that person** — the gate never opens, so nothing
+downstream gets a turn. Nothing about that is visible from outside. It doesn't error, it
+doesn't log, it looks exactly like an app that is switched off.
+
+Swept against the same replayed day, changing only that one number:
+
+| grace | nudges in 8h |
+|---|---|
+| 10 min | 0 |
+| 5 min | 0 |
+| 3 min | 6 |
+| 2 min | 6 |
+
+The cliff is between five and three, and three lands on the daily budget — so the budget
+becomes the real limiter, which is where the limiting belongs. Two minutes buys nothing
+over three, which is a good sign the number is not delicately tuned.
+
+### Why ten was ever right, and why it stopped being
+
+Ten minutes was **the only defence against nudging you mid-conversation**, because the flat
+in-AI gate did not exist until this morning. It had to cover both "you are in the AI right
+now" and "you just left it," so it was sized for the harder of the two. Once the flat gate
+landed, the grace was left holding a job it no longer had — and still charging full price
+for it.
+
+**Generalisable: when you add a precise guard, go and shrink the blunt one it replaced.**
+Otherwise the old approximation keeps running, and its cost is now pure. The bug was not
+introduced this morning; it was *revealed* this morning, and it had been making the
+product inert the whole time.
+
+### The bit that should be uncomfortable
+
+This shipped. It had a test suite, a coverage file that runs against the real nine-rule
+configuration, and three rounds of review. Every one of those asks "does this rule fire
+when its conditions are met?" **None of them asked "can this configuration reach a real
+person?"** Silence is the one failure mode that passes every test you thought to write,
+because the tests were about rules and the failure was about a *person*.
+
+The new test is written as a person rather than a rule — four rounds of four minutes in
+Claude and three minutes stuck on an email, asserting only that *something* fires. It fails
+at a ten-minute grace and also at five, so it is load-bearing in both directions.
+
+### Also found, sitting in his preferences
+
+`dailyBudget = 15`, left over from the deleted engine, silently overriding the new default
+of 6. Stale preference keys outlive the code that wrote them, so anyone who ran an old
+build was going to be twice as interrupted as designed, invisibly. Cleared on his machine
+along with two other dead keys (`amnesty`, `sensitivity`) that nothing has read since the
+rewrite. Not worth migration code for a population of one, but worth knowing the class
+exists: **a default is only a default for people who have never run your app before.**

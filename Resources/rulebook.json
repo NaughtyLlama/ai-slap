@@ -13,9 +13,20 @@
   ],
   "aiContexts": {
     "_comment": [
-      "Seeing any of these opens a grace window and suppresses every rule.",
-      "docs/02: fail open \u2014 accusing someone of skipping AI right after they used",
-      "it is the fastest uninstall available.",
+      "Seeing any of these blocks every rule outright while you are in one, and opens",
+      "a short grace window for the minutes after you leave. docs/02: fail open \u2014",
+      "accusing someone of skipping AI right after they used it is the fastest",
+      "uninstall available.",
+      "",
+      "That grace was ten minutes and is now three. Ten was sized for a job it no",
+      "longer has: it was the ONLY defence against nudging you mid-conversation, since",
+      "the flat in-AI gate did not exist yet. It also made the product inert for the",
+      "people most likely to run it. Replayed against eight hours of switching windows",
+      "every 40-120s while touching AI every seven minutes, ten minutes produced zero",
+      "nudges and so did five; three produced six, which is the daily budget. Anyone",
+      "who touches AI more often than the grace is long can never be nudged at all,",
+      "and that is most of this app's users. The grace now covers only the tail where",
+      "you are acting on what the AI just gave you.",
       "",
       "Because this suppresses everything, a false positive here is expensive in a",
       "way a missed nudge is not: it silences the product invisibly. So the title",
@@ -159,7 +170,7 @@
       },
       "condition": {
         "dwellMs": 90000,
-        "noAiContextForMs": 600000
+        "noAiContextForMs": 180000
       },
       "confidence": 0.8,
       "cooldownMs": 5400000,
@@ -190,7 +201,7 @@
       },
       "condition": {
         "dwellMs": 240000,
-        "noAiContextForMs": 600000
+        "noAiContextForMs": 180000
       },
       "confidence": 0.45,
       "cooldownMs": 10800000,
@@ -219,7 +230,7 @@
       },
       "condition": {
         "dwellMs": 120000,
-        "noAiContextForMs": 600000
+        "noAiContextForMs": 180000
       },
       "confidence": 0.6,
       "cooldownMs": 5400000,
@@ -252,7 +263,7 @@
       },
       "condition": {
         "dwellMs": 150000,
-        "noAiContextForMs": 600000
+        "noAiContextForMs": 180000
       },
       "confidence": 0.65,
       "cooldownMs": 5400000,
@@ -279,7 +290,7 @@
       },
       "condition": {
         "dwellMs": 180000,
-        "noAiContextForMs": 600000
+        "noAiContextForMs": 180000
       },
       "confidence": 0.6,
       "cooldownMs": 5400000,
@@ -305,7 +316,7 @@
       },
       "condition": {
         "dwellMs": 20000,
-        "noAiContextForMs": 600000,
+        "noAiContextForMs": 180000,
         "repeatCount": 3,
         "repeatWithinMs": 600000
       },
@@ -325,7 +336,7 @@
       },
       "condition": {
         "dwellMs": 20000,
-        "noAiContextForMs": 600000,
+        "noAiContextForMs": 180000,
         "returnCount": 12,
         "returnWithinMs": 5400000,
         "returnShorterThanMs": 120000
@@ -362,7 +373,7 @@
       },
       "condition": {
         "dwellMs": 30000,
-        "noAiContextForMs": 600000,
+        "noAiContextForMs": 180000,
         "accumulatedTodayMs": 900000
       },
       "confidence": 0.55,
