@@ -1,0 +1,169 @@
+import XCTest
+@testable import AISlap
+
+/// These run against the **shipping nine-rule configuration**, not a synthetic one.
+/// The bugs that got past the first round of engine tests were all in the interaction
+/// between real rules — a broad rule outranking and silently blocking narrower ones —
+/// which a single invented rule cannot show.
+@MainActor
+final class RulebookCoverageTests: XCTestCase {
+    private func shippingRulebook() throws -> Rulebook {
+        let here = URL(fileURLWithPath: #filePath)
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root.appendingPathComponent("Resources/rulebook.json")
+        return try JSONDecoder().decode(Rulebook.self, from: Data(contentsOf: url))
+    }
+
+    private func makeEngine(_ book: Rulebook, clock: @escaping () -> Date)
+        -> (NudgeEngine, String)
+    {
+        let name = "AISlapTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        let engine = NudgeEngine(
+            rulebook: book, handoff: Handoff(destinations: book.destinations),
+            defaults: defaults, now: clock,
+            suppressionCheck: { Suppression.Verdict(suppressed: false, reason: nil) })
+        engine.quietHours = (23, 0)
+        return (engine, name)
+    }
+
+    private func noon(_ offset: TimeInterval = 0) -> Date {
+        Date(timeIntervalSince1970: 1_789_153_200).addingTimeInterval(offset)
+    }
+
+    /// A Gmail inbox in Chrome. Three rules claim it, which is what makes it the right
+    /// shape for testing the queue.
+    private let inbox = WindowContext(
+        bundleID: "com.google.Chrome", appName: "Google Chrome",
+        title: "Inbox (12) - chen@example.com - Gmail"
+    )
+    /// A browser window that no content rule claims.
+    private let browsing = WindowContext(
+        bundleID: "com.google.Chrome", appName: "Google Chrome", title: "Some tool - Dashboard"
+    )
+
+    /// One real window per rule. A rule that can never be a candidate is dead weight
+    /// that still reads as a feature in the menu and the notes.
+    private func sampleWindows() -> [(rule: String, context: WindowContext)] {
+        func chrome(_ title: String) -> WindowContext {
+            WindowContext(bundleID: "com.google.Chrome", appName: "Google Chrome", title: title)
+        }
+        return [
+            ("email.message.dwell", chrome("Re: the thing - chen@example.com - Gmail")),
+            ("email.inbox.dwell", chrome("Inbox (12) - chen@example.com - Gmail")),
+            ("chat.thread.dwell", chrome("general - Slack")),
+            ("doc.dwell", chrome("Chapter one - Google Docs")),
+            ("sheet.dwell", chrome("Q3 numbers - Google Sheets")),
+            ("search.repeated", chrome("swift concurrency - Google Search")),
+            ("surface.returns", chrome("Some tool - Dashboard")),
+            ("surface.grind", chrome("Some tool - Dashboard")),
+        ]
+    }
+
+    func testEveryEnabledRuleCanBeOffered() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+
+        for sample in sampleWindows() {
+            let offered = engine.candidates(for: sample.context).map(\.id)
+            XCTAssertTrue(offered.contains(sample.rule),
+                          "\(sample.rule) is switched on but never offered for a window "
+                          + "it is written for: \"\(sample.context.title ?? "")\"")
+        }
+
+        // The one that was genuinely unreachable. Its matcher returns false for every
+        // window, and two rules match anything, so the old "nobody claimed it" fallback
+        // could never run.
+        XCTAssertTrue(engine.candidates(for: sampleWindows().last!.context)
+            .contains { $0.id == "surface.grind" })
+
+        // And the one the rulebook has deliberately switched off stays off.
+        let enabled = Set(book.rules.filter(\.enabled).map(\.id))
+        XCTAssertFalse(enabled.contains("timer.checkin"),
+                       "timer.checkin is disabled in the rulebook; if that changes, give "
+                       + "it a sample window above")
+    }
+
+    /// The bug that hid two rules. `surface.returns` matches any window and outranks
+    /// both `timer.checkin` and `email.inbox.dwell`. Blocking it must not silence them.
+    func testABlockedBroadRuleDoesNotSuppressTheOnesBeneathIt() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+        var fired: [String] = []
+        engine.onNudge = { _, _, ruleID in fired.append(ruleID) }
+
+        let ordered = engine.candidates(for: inbox).map(\.id)
+        XCTAssertLessThan(try XCTUnwrap(ordered.firstIndex(of: "surface.returns")),
+                          try XCTUnwrap(ordered.firstIndex(of: "email.inbox.dwell")),
+                          "returns outranks the inbox rule, which is the setup for the bug")
+
+        engine.contextChanged(to: inbox)
+        let returns = try XCTUnwrap(engine.candidates(for: inbox)
+            .first { $0.id == "surface.returns" })
+        if case .pass = engine.gate(returns, context: inbox) {
+            XCTFail("returns should be blocked — one visit, not twelve")
+        }
+
+        t = 300  // past the inbox rule's four minutes
+        engine.tick()
+        XCTAssertEqual(fired, ["email.inbox.dwell"],
+                       "a rule failing its own condition must step aside, not block")
+    }
+
+    func testDougWaitsOnTheRuleThatCanActuallyFire() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+
+        engine.contextChanged(to: inbox)
+        t = 120  // half of the timer rule's 25 minutes
+        let progress = try XCTUnwrap(engine.dwellProgress())
+        XCTAssertEqual(progress, 0.5, accuracy: 0.05,
+                       "progress must track the rule that will fire, not a blocked one")
+    }
+
+    /// Turning the watching off has to drop what was being held about today, not just
+    /// stop mentioning it. The accumulation rule is the honest test: it fires on time
+    /// totalled across the day, so if forgetting works, its gate closes again.
+    func testSwitchingOffForgetsWhereYouHaveBeen() throws {
+        let book = try shippingRulebook()
+        var t: TimeInterval = 0
+        let (engine, name) = makeEngine(book) { self.noon(t) }
+        defer { UserDefaults().removePersistentDomain(forName: name) }
+        let tool = WindowContext(bundleID: "com.google.Chrome", appName: "Google Chrome",
+                                 title: "Some tool - Dashboard")
+        let grind = try XCTUnwrap(engine.candidates(for: tool).first { $0.id == "surface.grind" })
+
+        let elsewhere = WindowContext(bundleID: "com.google.Chrome",
+                                      appName: "Google Chrome", title: "Other thing - Page")
+
+        // Twenty minutes on the surface, then away, so the time is banked in the day's
+        // totals rather than still running on the current sit. That distinction is the
+        // whole point: an earlier version of this test passed with the totals left
+        // intact, because clearing the *current* context was enough to close the gate.
+        engine.contextChanged(to: tool)
+        t = 1_200; engine.contextChanged(to: elsewhere)
+        t = 1_260; engine.contextChanged(to: tool)
+        t = 1_320
+        guard case .pass = engine.gate(grind, context: tool) else {
+            return XCTFail("twenty banked minutes should satisfy the accumulation rule")
+        }
+
+        engine.forgetEverything()
+        XCTAssertNil(engine.dwellProgress(), "nothing should be under observation")
+
+        // Back on the same surface, with only seconds on the clock. If the banked total
+        // survived, this still passes — which is what forgetting has to prevent.
+        engine.contextChanged(to: tool)
+        t = 1_380
+        guard case .blocked = engine.gate(grind, context: tool) else {
+            return XCTFail("the day's totals survived being told to forget them")
+        }
+    }
+}

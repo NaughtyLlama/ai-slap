@@ -149,10 +149,13 @@ final class NudgeEngine {
     /// Doug uses it to look up before anything is said, which is the cheapest
     /// interruption the product has.
     func dwellProgress() -> Double? {
-        guard let context = current, let start = currentStart,
-              let rule = bestRule(for: context),
-              case .pass = gate(rule, context: context)
-        else { return nil }
+        guard let context = current, let start = currentStart else { return nil }
+        // The rule Doug is actually waiting on: the most confident one whose gates are
+        // already satisfied and which is only waiting for time to pass.
+        guard let rule = candidates(for: context).first(where: {
+            if case .pass = gate($0, context: context) { return true }
+            return false
+        }) else { return nil }
         let needed = rule.rule.condition.dwellMs / 1000
         guard needed > 0 else { return nil }
         return min(1, now().timeIntervalSince(start) / needed)
@@ -167,15 +170,44 @@ final class NudgeEngine {
 
     func tick() {
         guard let context = current, let start = currentStart,
-              let rule = bestRule(for: context) else { return }
-        guard case .pass = gate(rule, context: context) else { return }
-        guard now().timeIntervalSince(start) >= rule.rule.condition.dwellMs / 1000 else { return }
+              let rule = readyRule(for: context, since: start) else { return }
         fire(rule, context: context)
     }
 
-    private func bestRule(for context: WindowContext) -> CompiledRule? {
-        rules.filter { $0.matches(context) }
-            .max { $0.rule.confidence < $1.rule.confidence }
+    /// Every rule that claims this context, most confident first.
+    ///
+    /// **All of them, not just the best one.** An earlier version picked the highest
+    /// confidence match and then gated it, which let a broad rule sit on top of the
+    /// queue failing its own condition and silently suppress every rule beneath it.
+    /// `surface.returns` matches anything and outranks both `timer.checkin` and
+    /// `email.inbox.dwell`, so neither of those could ever fire.
+    ///
+    /// The accumulation rule needs its own route in. Its matcher returns false for
+    /// everything — it is defined by *time spent*, not by what the window is — and the
+    /// old code only consulted it when no other rule claimed the context. Two rules in
+    /// the book match anything at all, so that branch was unreachable and the rule had
+    /// never once been offered. It joins the queue on its own confidence instead, and
+    /// gates itself on the accumulated total like any other.
+    func candidates(for context: WindowContext) -> [CompiledRule] {
+        var candidates = rules.filter { $0.matches(context) }
+        if let accumulation = unrecognised(for: context) { candidates.append(accumulation) }
+        return candidates.sorted { $0.rule.confidence > $1.rule.confidence }
+    }
+
+    private func unrecognised(for context: WindowContext) -> CompiledRule? {
+        guard context.surfaceKey != nil else { return nil }
+        return rules.first {
+            $0.rule.enabled && $0.rule.match.unrecognised
+                && ($0.bundleIDs.isEmpty || $0.bundleIDs.contains(context.bundleID))
+        }
+    }
+
+    /// The first candidate that passes its gates *and* has had its dwell.
+    private func readyRule(for context: WindowContext, since start: Date) -> CompiledRule? {
+        candidates(for: context).first { rule in
+            guard case .pass = gate(rule, context: context) else { return false }
+            return now().timeIntervalSince(start) >= rule.rule.condition.dwellMs / 1000
+        }
     }
 
     func gate(_ candidate: CompiledRule, context: WindowContext) -> Gate {
@@ -283,6 +315,18 @@ final class NudgeEngine {
 
     /// The user is already doing the thing. Start the amnesty clock.
     func markUsedAI() { lastAIContextAt = now() }
+
+    /// Switching the watching off drops what was being kept about today. The counters
+    /// only ever lived in memory, but "off" should mean the app is not still holding
+    /// where you have been, not merely that it has stopped saying so.
+    func forgetEverything() {
+        current = nil
+        currentStart = nil
+        surfaceSeconds.removeAll()
+        visits.removeAll()
+        interrupted.removeAll()
+        pending = nil
+    }
 
     // MARK: - Bookkeeping
 

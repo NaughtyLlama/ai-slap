@@ -6,7 +6,7 @@ AI-slap never submits the chat for you.
 
 **It also watches which window you're in.** If you've been stuck on the same email or
 document for a while and haven't touched AI recently, Doug suggests handing it over. A
-few times a day at most, never during a call, never at night. Switch it off under
+few times a day at most, never while your microphone is in use, never at night. Switch it off under
 **Watch and nudge me** in the menu, or silence it for a few hours with **Quiet for a
 while**.
 

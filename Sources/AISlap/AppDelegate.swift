@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             engine.onHandoffResult = { [weak self] result in self?.report(result) }
             observer.onChange = { [weak self] context in self?.contextChanged(context) }
-            observer.start()
+            applyWatching()
             tickTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) {
                 [weak self] _ in self?.tick()
             }
@@ -73,7 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onToggleNudges: { [weak self] in
                 guard let engine = self?.engine else { return }
                 engine.isEnabled.toggle()
-                if !engine.isEnabled { self?.nudgePanel.close(); self?.doug.reset() }
+                // Off has to mean the observer stops, not merely that the nudges are
+                // swallowed. "Nothing is stored" and "nothing is being looked at" are
+                // different promises, and the menu was making the second one while the
+                // app kept reading window titles.
+                self?.applyWatching()
                 self?.refresh()
             },
             onSnooze: { [weak self] minutes in
@@ -110,6 +114,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Watching, and the nudge
+
+    /// The single place that decides whether this app is looking at anything. Called on
+    /// launch and whenever the toggle moves, so the observer's state and the menu's
+    /// promise cannot drift apart.
+    private func applyWatching() {
+        guard let engine else { observer.stop(); return }
+        if engine.isEnabled {
+            observer.start()
+        } else {
+            observer.stop()
+            engine.forgetEverything()
+            currentContext = nil
+            nudgePanel.close()
+            doug.reset()
+        }
+    }
+
 
     /// Switching apps drops Doug straight back to sleep. Escalation happens only
     /// *within* one sustained context; carrying a tier across an app switch is how a
@@ -213,7 +234,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeys.register(id: GlobalHotkeys.panicID, keyCode: 5, modifiers: 2048 | 256) { [weak self] in  // ⌥⌘G
             guard let self else { return }
-            self.doug.isHidden ? self.doug.unhide() : self.doug.hide()
+            // Hiding Doug for a screen share has to hide the *speech bubble* too, and
+            // stop a new one arriving. Hiding only the crab left the nudge free to pop
+            // up over whatever was being demonstrated, which is the exact accident this
+            // shortcut exists to prevent.
+            if self.doug.isHidden {
+                self.doug.unhide()
+                self.engine?.suppression.cancelPanic()
+            } else {
+                self.doug.hide()
+                self.nudgePanel.close()
+                self.engine?.suppression.panic()
+            }
             self.refresh()
         }
     }
@@ -249,10 +281,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let verdict = engine.suppression.check()
         if verdict.suppressed { return verdict.reason.map { "Quiet — \($0)" } ?? "Quiet" }
         guard let context = currentContext else { return "Watching" }
-        guard let rule = engine.rules.filter({ $0.matches(context) })
-            .max(by: { $0.rule.confidence < $1.rule.confidence })
-        else { return "Nothing to say about \(context.appName)" }
-        switch engine.gate(rule, context: context) {
+        let candidates = engine.candidates(for: context)
+        guard let rule = candidates.first else { return "Nothing to say about \(context.appName)" }
+        // Report the first rule that is only waiting for time, if there is one, rather
+        // than the most confident rule that happens to be blocked.
+        let waiting = candidates.first { if case .pass = engine.gate($0, context: context) { return true }; return false }
+        switch engine.gate(waiting ?? rule, context: context) {
         case .blocked(let why): return "Quiet — \(why)"
         case .pass:
             let progress = engine.dwellProgress() ?? 0
