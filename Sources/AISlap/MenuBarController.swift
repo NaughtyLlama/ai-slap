@@ -107,11 +107,12 @@ final class MenuBarController: NSObject {
         accessibilityItem.action = #selector(fixPermission)
         menu.addItem(accessibilityItem)
 
-        screenRecordingItem.isEnabled = false
+        screenRecordingItem.target = self
+        screenRecordingItem.action = #selector(showWelcome)
         menu.addItem(screenRecordingItem)
 
         let welcome = NSMenuItem(
-            title: "How this works…", action: #selector(showWelcome), keyEquivalent: ""
+            title: "Set up AI-slap…", action: #selector(showWelcome), keyEquivalent: ""
         )
         welcome.target = self
         menu.addItem(welcome)
@@ -137,7 +138,7 @@ final class MenuBarController: NSObject {
         dougHidden: Bool,
         launchAtLogin: LaunchAtLogin.State
     ) {
-        let broken = !hasAccessibility
+        let broken = !hasAccessibility || !hasScreenRecording
         let image = NSImage(
             systemSymbolName: broken ? "exclamationmark.triangle.fill" : "bubble.left.and.text.bubble.right",
             accessibilityDescription: broken ? "AI-slap needs attention" : "AI-slap"
@@ -145,7 +146,7 @@ final class MenuBarController: NSObject {
         image?.isTemplate = !broken
         statusItem.button?.image = image
         statusItem.button?.contentTintColor = broken ? .systemRed : nil
-        statusItem.button?.toolTip = broken ? "AI-slap can't paste — open the menu" : "AI-slap"
+        statusItem.button?.toolTip = broken ? "AI-slap permissions need attention — open the menu" : "AI-slap"
 
         if !hotkeyRegistered {
             handoffStatusItem.title = "⚠️ ⌥Space is taken by another app"
@@ -168,7 +169,7 @@ final class MenuBarController: NSObject {
 
         screenRecordingItem.title = hasScreenRecording
             ? "Screenshots on"
-            : "Screenshots off — handoffs go as text"
+            : "⚠️ Screenshots off — click to set up"
         screenRecordingItem.isHidden = hasScreenRecording && hasAccessibility
 
         switch launchAtLogin {

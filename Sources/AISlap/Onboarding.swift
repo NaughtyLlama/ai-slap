@@ -9,37 +9,99 @@ import ApplicationServices
 /// broken. So the first run says what it does, asks where handoffs should go, and walks
 /// both permissions rather than waiting to fail.
 enum Onboarding {
-    private static let seenKey = "hasSeenWelcome"
-
-    static var hasSeen: Bool {
-        get { UserDefaults.standard.bool(forKey: seenKey) }
-        set { UserDefaults.standard.set(newValue, forKey: seenKey) }
+    struct Permissions: Equatable {
+        var accessibility: Bool
+        var screen: Bool
+        var complete: Bool { accessibility && screen }
     }
+
+    enum Action { case accessibility, screen, skip }
+
+    /// Persist incomplete setup across a Settings detour or a process restart.
+    /// Effects are injected so tests never open dialogs or change system permissions.
+    final class Flow {
+        let defaults: UserDefaults
+        let readPermissions: () -> Permissions
+        let welcome: () -> Void
+        let choose: (Permissions) -> Action
+        let request: (Action) -> Void
+        private var showing = false
+        private var lastPermissions: Permissions?
+
+        init(defaults: UserDefaults, readPermissions: @escaping () -> Permissions,
+             welcome: @escaping () -> Void, choose: @escaping (Permissions) -> Action,
+             request: @escaping (Action) -> Void) {
+            self.defaults = defaults
+            self.readPermissions = readPermissions
+            self.welcome = welcome
+            self.choose = choose
+            self.request = request
+        }
+
+        var pending: Bool {
+            get { defaults.object(forKey: "permissionSetupPending") as? Bool ?? true }
+            set { defaults.set(newValue, forKey: "permissionSetupPending") }
+        }
+
+        func start(force: Bool = false) {
+            guard !showing else { return }
+            showing = true
+            defer { showing = false }
+            if force || !defaults.bool(forKey: "hasSeenWelcome") {
+                welcome()
+                defaults.set(true, forKey: "hasSeenWelcome")
+                pending = true
+            }
+            if pending { advance() }
+        }
+
+        func resume() {
+            guard pending, !showing, readPermissions() != lastPermissions else { return }
+            start()
+        }
+
+        private func advance() {
+            let state = readPermissions()
+            lastPermissions = state
+            if state.complete { pending = false; return }
+            switch choose(state) {
+            case .skip: pending = false
+            case .accessibility: request(.accessibility)
+            case .screen: request(.screen)
+            }
+        }
+    }
+
+    private static let flow = Flow(
+        defaults: .standard,
+        readPermissions: { Permissions(accessibility: AXIsProcessTrusted(), screen: WindowCapture.hasPermission) },
+        welcome: { welcome() }, choose: { permissions($0) }, request: { request($0) }
+    )
 
     static func showIfFirstRun(then finished: @escaping () -> Void) {
-        guard !hasSeen else { return }
-        show(force: false, then: finished)
-    }
-
-    static func show(force: Bool, then finished: @escaping () -> Void) {
-        hasSeen = true
-        NSApp.activate(ignoringOtherApps: true)
-        welcome()
-        permissions()
+        flow.start()
         finished()
     }
 
+    static func show(force: Bool, then finished: @escaping () -> Void) {
+        flow.start(force: force)
+        finished()
+    }
+
+    static func resumeIfNeeded() { flow.resume() }
+
     // MARK: - Steps
 
-    private static func welcome() {
+    static func makeWelcomeAlert() -> (NSAlert, NSPopUpButton) {
         let alert = NSAlert()
         alert.messageText = "Press ⌥Space on any window"
         alert.informativeText = """
             AI-slap takes a picture of whatever window you're looking at and drops it \
-            into a new chat with your AI, so you can ask about it without describing it.
+            into your AI app. In a browser, you paste the prompt and screenshot yourself.
 
             You get to see the screenshot and type what you want before anything is sent. \
-            Nothing is submitted for you, and nothing is recorded anywhere.
+            AI-slap never submits the chat or saves a screenshot history. Your chosen AI \
+            receives anything you paste; its privacy settings apply.
 
             Doug the hermit crab lives on your desktop. Drag him where you like. \
             Double-click him to hand off without touching the keyboard.
@@ -64,6 +126,12 @@ enum Onboarding {
         stack.frame = NSRect(x: 0, y: 0, width: 400, height: 28)
         alert.accessoryView = stack
 
+        return (alert, picker)
+    }
+
+    private static func welcome() {
+        let (alert, picker) = makeWelcomeAlert()
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
         if let id = picker.selectedItem?.representedObject as? String {
             Handoff.preferredID = id
@@ -73,11 +141,9 @@ enum Onboarding {
 
     /// Both permissions, explained in terms of what breaks without them rather than in
     /// terms of what they are called in System Settings.
-    private static func permissions() {
-        let accessibility = AXIsProcessTrusted()
-        let screen = WindowCapture.hasPermission
-        if accessibility && screen { return }
-
+    static func makePermissionsAlert(_ state: Permissions) -> NSAlert {
+        let accessibility = state.accessibility
+        let screen = state.screen
         let alert = NSAlert()
         alert.messageText = "Two permissions and you're done"
         alert.informativeText = """
@@ -87,33 +153,45 @@ enum Onboarding {
             \(screen ? "✓" : "•") Screen Recording lets it take the screenshot. \
             Without it handoffs go over as text only.
 
-            macOS may ask you to quit and reopen AI-slap after you grant Accessibility. \
-            That's normal.
+            Enable each permission in System Settings. Return to AI-slap to continue. \
+            If macOS asks you to quit and reopen, setup resumes when you reopen. \
+            You can also return through menu bar → Set up AI-slap….
             """
         if !accessibility { alert.addButton(withTitle: "Turn on Accessibility") }
         if !screen { alert.addButton(withTitle: "Turn on Screenshots") }
-        alert.addButton(withTitle: accessibility || screen ? "Finish" : "Skip for now")
+        alert.addButton(withTitle: "Skip for now")
 
+        return alert
+    }
+
+    private static func permissions(_ state: Permissions) -> Action {
+        let accessibility = state.accessibility
+        let screen = state.screen
+        let alert = makePermissionsAlert(state)
+        NSApp.activate(ignoringOtherApps: true)
         let clicked = alert.runModal()
         let first = NSApplication.ModalResponse.alertFirstButtonReturn
         let wantsAccessibility = !accessibility && clicked == first
         let wantsScreen = !screen && clicked == (accessibility ? first : .alertSecondButtonReturn)
 
-        if wantsAccessibility {
+        if wantsAccessibility { return .accessibility }
+        if wantsScreen { return .screen }
+        return .skip
+    }
+
+    private static func request(_ action: Action) {
+        switch action {
+        case .accessibility:
             _ = AXIsProcessTrustedWithOptions(
                 [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             )
             NSWorkspace.shared.open(URL(string:
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-            return  // The grant needs System Settings and often a relaunch; don't loop on it.
-        }
-        if wantsScreen {
+        case .screen:
             _ = WindowCapture.requestPermission()
-            if !WindowCapture.hasPermission {
-                NSWorkspace.shared.open(URL(string:
-                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-            }
-            return
+            NSWorkspace.shared.open(URL(string:
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        case .skip: break
         }
     }
 }

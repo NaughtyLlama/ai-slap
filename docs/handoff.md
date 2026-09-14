@@ -81,8 +81,8 @@ dismissals. Recovery appears only on the paths that leave someone holding someth
 
 ### 5. Never auto-submit
 
-The prompt lands in the composer, filled in, **not sent**. The user reads what is about
-to be transmitted and presses Return themselves. A screenshot may contain something they
+The prompt lands in the composer, filled in, **not sent**. The user reviews the draft and presses Return themselves. The receiving app may upload
+pasted attachments before submission; its privacy settings apply. A screenshot may contain something they
 would not choose to send, and a product that presses send for you is a product you stop
 trusting with your screen.
 
@@ -104,4 +104,5 @@ away**, and the user is never left with a broken interaction and no recourse.
 
 No history, no database, no counters, no network. The app holds a screenshot for the
 seconds it takes to hand it over, and a recovery payload for five minutes when something
-went wrong. Nothing else is kept, which is why there is no setting to turn anything off.
+went wrong. Preferences and diagnostic messages remain. Manual clipboard copies and copies retained
+by the destination are outside that in-memory expiry. See READ-ME-FIRST.md for privacy details.

@@ -767,3 +767,17 @@ What still worked was asking the window server what the app had open — two win
 390×372 and one 100×68, which is an alert and a crab. That proves it launched, did not
 crash, and put the right things on screen. It proves nothing about whether they look
 right. Worth knowing the difference before reporting either one.
+
+
+## Setup must survive leaving the app
+
+First-run setup previously marked itself seen before either permission was granted.
+Choosing Accessibility exited the dialog and relaunch skipped Screen Recording. Setup now
+persists a separate pending state, resumes after a grant or relaunch, and lets Skip for
+now stop the prompts. Both permission orders and explicit reopening have regression tests.
+The menu exposes screenshot setup and flags either missing permission.
+
+The release is explicitly Apple Silicon, includes its guide, and reports its real version.
+Notarization must archive the same app after stapling: rerunning the build deletes the
+ticket. Packaging now has a notarize flow and a separate repack mode. The privacy guide
+also distinguishes app memory from clipboard copies and content received by an AI service.

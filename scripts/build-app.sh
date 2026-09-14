@@ -39,18 +39,27 @@ else
     echo "!!  Run ./scripts/make-signing-identity.sh once to stop that."
 fi
 
-echo "==> Building ${APP_NAME} (release)"
-swift build -c release
+ARCH="${AISLAP_ARCH:-$(uname -m)}"
+case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac
+case "${1:-}" in ""|--run|--install) ;; *) echo "Usage: $0 [--run|--install]" >&2; exit 1 ;; esac
+
+echo "==> Building ${APP_NAME} (release, ${ARCH})"
+swift build -c release --arch "$ARCH"
+BIN_DIR="$(swift build -c release --arch "$ARCH" --show-bin-path)"
 
 echo "==> Assembling ${APP}"
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-cp ".build/release/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
+cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "${APP}/Contents/Info.plist"
 # Where handoffs can go. A file rather than compiled in, so a vendor renaming an app
 # is an edit rather than a new build.
 cp "Resources/destinations.json" "${APP}/Contents/Resources/destinations.json"
 cp "Resources/AISlap.icns" "${APP}/Contents/Resources/AISlap.icns"
+
+# SwiftPM release binaries include debug-map paths to the build machine.
+# Keep debug artifacts in .build; ship no local source paths in the executable.
+/usr/bin/strip -S "${APP}/Contents/MacOS/${APP_NAME}"
 
 echo "==> Signing with identity: ${SIGN_IDENTITY}"
 codesign --force --options runtime --sign "${SIGN_IDENTITY}" "${APP}"

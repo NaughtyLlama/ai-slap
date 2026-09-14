@@ -2,7 +2,7 @@
 
 Press ⌥Space on any window. It photographs that window, opens a new chat in your AI, and
 pastes it in with whatever you want to ask. Doug the hermit crab lives on the desktop and
-is the same button. Nothing is recorded anywhere.
+is the same button. It keeps no screenshot history; clipboard and destination privacy still apply.
 
 **This file mirrors [`CLAUDE.md`](CLAUDE.md) so non-Claude agents route the same way. Keep
 the two in sync — if you change one, change the other.**
@@ -65,8 +65,9 @@ Doug.dc.html                           the design canvas — the source for the 
 ./scripts/build-app.sh --run
 ```
 
-**Nothing is written to disk but preferences.** No database, no log, no export. If you
-find yourself adding one, that is a product decision and not an implementation detail.
+**No screenshot history or database.** Preferences are saved and diagnostic messages
+are emitted. Clipboard and destination software can retain handoff content. Adding
+content persistence is a product decision, not an implementation detail.
 
 ## Decisions already made — don't relitigate without a reason
 
@@ -95,7 +96,7 @@ find yourself adding one, that is a product decision and not an implementation d
   rewritten each session and is the only description of the present. `NOTES.md` is
   appended to and explains why.
 - **`HANDOFF.md` and `parking-lot.md` are not in the repo, on purpose.** They describe
-  one person's machine and one week's work, and this repo is public. They live on disk
+  one person's machine and one week's work, and are not intended for publication. They live on disk
   and are ignored. Anything in them that turns out to be about the *code* belongs in
   `NOTES.md` instead, where everyone can read it.
 - `AGENTS.md` is a generated mirror of this file. Edit `CLAUDE.md`, then copy it across

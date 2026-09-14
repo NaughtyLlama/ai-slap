@@ -67,6 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard handoff != nil else { return }
+        Onboarding.resumeIfNeeded()
+        refresh()
+    }
+
     // MARK: - The handoff
 
     private func handoffNow() {

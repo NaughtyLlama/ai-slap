@@ -1,80 +1,101 @@
-# AI-slap
+# AI-slap: start here
 
-Press **⌥Space** on any window. It photographs that window, opens a new chat in Claude
-(or ChatGPT, or Gemini), and pastes the picture in with whatever you want to ask about it.
+Press **⌥Space** to capture the window you're using, review the picture, and hand it to
+an AI. Doug, the hermit crab on your desktop, does the same thing when double-clicked.
+AI-slap never submits the chat for you.
 
-There's a hermit crab called Doug on your desktop. Drag him anywhere. Double-click him
-to hand off without touching the keyboard. He's not doing anything else.
+## Before downloading
 
-Nothing is recorded. No database, no log, no analytics, no network. The app only knows
-what's on your screen in the second you press the key, and then it forgets.
+- **The prebuilt download requires an Apple Silicon Mac (M1 or later), macOS 14+.**
+  Check Apple menu → About This Mac. The download does not run on Intel, Windows or Linux.
+- Sign in to your preferred AI app or website first. Its account requirements and charges
+  apply. AI-slap itself needs no API key or account.
+- Native AI apps can receive automatic paste when their composer is detected. **Browser
+  destinations require manual paste**, described below.
 
----
+## Install
 
-## Installing it
+1. Open [the latest release](https://github.com/NaughtyLlama/ai-slap/releases/latest).
+   Download **AISlap-apple-silicon.zip** from Assets, not “Source code.” Older v0.2.0
+   releases call it AISlap.zip; that build is also Apple Silicon only.
+2. Unzip, open the AI-slap folder, and drag **AISlap.app** into **Applications**.
+3. Open AISlap.app. A signed and notarized release opens through the normal macOS dialog.
+   **The current beta is ad-hoc signed and is not notarized by Apple.** macOS may block it.
+   If you trust this download and choose to proceed, first attempt to open it, then go
+   to **System Settings → Privacy & Security → Open Anyway** beside the AI-slap message.
+   Confirm the per-app exception. If that option is unavailable, stop and ask for help;
+   a managed work Mac may not allow it. Do not disable Gatekeeper or remove quarantine
+   in Terminal. See [Apple's instructions](https://support.apple.com/en-au/guide/mac-help/-mh40616/mac).
+4. Choose your AI in the welcome dialog. Setup offers **Accessibility** (automatic paste)
+   and **Screen Recording** (screenshots). Enable each in System Settings. Return to
+   AI-slap to continue; if macOS asks you to quit and reopen, setup resumes after relaunch.
+   You can reopen it at any time through **menu bar → Set up AI-slap…**.
+5. Open a harmless window, such as a test note. Press **⌥Space**, check the screenshot,
+   and type your question. Press **Send** to hand it to the AI. Review the resulting
+   draft there before submitting it yourself.
 
-**1. Unzip and drag `AISlap.app` into your Applications folder.**
+You can skip permissions. Without Screen Recording, only your typed prompt is available.
+Without Accessibility, use the manual paste flow. Neither permission is permission for
+AI-slap to submit a chat.
 
-**2. Open it — the first time needs a detour.**
+## In a browser, or when automatic paste stops
 
-This app isn't signed with a paid Apple developer certificate, so macOS will refuse it
-the first time and say it "cannot be opened because Apple cannot check it for malicious
-software." That's a statement about the certificate, not about the app.
+AI-slap opens your selected destination and shows **Finish your handoff**.
 
-- **Right-click** (or Control-click) `AISlap.app` → **Open** → **Open** again.
-- On macOS Sequoia and later that button may not appear. Instead go to
-  **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next
-  to the message about AI-slap. Then open it normally.
+1. Sign in if necessary and start a new chat yourself.
+2. Click the chat composer and press **⌘V** to paste the prompt. If the panel says your
+   newer clipboard was kept, click **Copy prompt** first.
+3. Click **Copy screenshot**, return to the composer, and press **⌘V** again. The button
+   is unavailable if no screenshot was captured.
+4. Check that both arrived, then click **Done** on the recovery panel. Submit the chat
+   yourself only when ready.
 
-If neither works, open Terminal, type `xattr -dr com.apple.quarantine ` (with the
-trailing space), drag `AISlap.app` onto the window, and press Return. Then open it.
+The recovery panel expires after five minutes. If sign-in takes longer, run a new handoff.
 
-**3. Say yes to two permissions.**
+## Controls and troubleshooting
 
-The app asks for both on first run and explains each one:
-
-- **Accessibility** — lets it paste into your AI app. Without it, the handoff stops at
-  your clipboard and you press ⌘V yourself.
-- **Screen Recording** — lets it take the screenshot. Without it, handoffs are text only.
-
-macOS may ask you to quit and reopen after granting Accessibility. That's normal, and it
-only happens once.
-
-**4. Press ⌥Space on something.**
-
----
-
-## Using it
-
-| | |
+| Control | Action |
 |---|---|
-| **⌥Space** | Hand off the window you're looking at |
-| **Double-click Doug** | The same thing |
-| **Drag Doug** | Move him. He stays where you put him |
-| **⌥⌘G** | Hide Doug instantly, for screen shares |
+| ⌥Space | Capture and review the current window |
+| Double-click Doug | Start the same handoff |
+| Drag Doug | Move him |
+| ⌥⌘G | Hide or show Doug, including before a screen share |
+| Menu bar → Send it to | Change AI destination |
+| Menu bar → Set up AI-slap… | Revisit destination and permission setup |
+| Menu bar → Ask me before sending | Restore the preview after “Don't ask again” |
+| Menu bar → Quit AI-slap | Quit the app |
 
-Before anything is sent you get a preview: the screenshot, and a box to type what you
-actually want. Change the text, press Return. Nothing is ever submitted for you — you
-get the last word in the chat.
+**Missing screenshot:** check Screen Recording first. If multiple windows cannot be
+uniquely identified, AI-slap sends text only; try a single window. Reopen after permission
+changes if macOS requests it.
 
-If the preview gets annoying, tick **Don't ask again** in it. To bring it back, use
-**Ask me before sending** in the menu bar.
+**⌥Space does nothing:** another app may own the shortcut. Try double-clicking Doug or
+menu bar → Hand off this window.
 
-## If something's wrong
+**Automatic paste doesn't work:** use the recovery panel. App versions and composer
+layouts can differ; automatic paste is attempted, not guaranteed.
 
-**The menu-bar icon is a red triangle.** Accessibility got switched off. Click the icon
-and then the warning to open the right settings pane.
+**After a locally rebuilt app loses Accessibility:** remove its old entry in System
+Settings → Privacy & Security → Accessibility, add the rebuilt app, and re-enable it.
 
-**⌥Space does nothing.** Another app has claimed that shortcut. The menu says so when
-that happens, and the menu item does the same job.
+## Privacy
 
-**It hands off to the wrong AI.** Menu bar → **Send it to**.
+AI-slap captures one window when you ask. It has no screenshot history, analytics,
+database, or network client. It stores preferences and emits diagnostic status messages.
+Screenshots stay in memory during the handoff; failed handoffs remain recoverable for up
+to five minutes or until the panel is closed or replaced.
 
-**The screenshot is missing.** If that app has several windows open and the app can't
-tell which one you meant, it won't guess — it sends text instead and tells you. Closing
-the extra windows fixes it.
+The handoff uses the **system clipboard**. Automatic paste restores the previous clipboard
+only while AI-slap still owns it. Manual copies can remain until you copy something else,
+and clipboard managers or clipboard syncing can retain them.
 
-## What it doesn't do
+**Pasting shares content with the chosen AI app or website.** That service controls its
+uploads, retention and privacy settings, including behavior before you submit a chat.
+Review screenshots for private information before approving them. “Never auto-submit”
+does not mean the receiving service cannot process a pasted image.
 
-It doesn't watch what you do, keep a history, score your productivity, or phone home.
-There's nothing to opt out of, because there's nothing collecting anything.
+## Remove it
+
+Turn off **Open at login** in AI-slap's menu if enabled, choose **Quit AI-slap**, then move
+AISlap.app from Applications to Trash. Remove its Accessibility and Screen Recording
+entries in System Settings if desired. Preferences may remain on the Mac.

@@ -1,47 +1,86 @@
 # AI-slap
 
-Press **⌥Space** on any window. It photographs that window, opens a new chat in the AI
-of your choice, and pastes the picture in with whatever you want to ask about it.
+Press **⌥Space** to take a picture of the window you're using, review it, and hand it to
+your AI with a question. Native apps can receive automatic paste; in a browser you paste
+the prompt and screenshot yourself. **AI-slap never submits the chat.**
 
-There is a hermit crab called Doug living in a dead CRT on your desktop. Drag him
-anywhere. Double-click him to hand off. He is not doing anything else, and that is fine.
+Doug is a hermit crab living in a dead CRT on your desktop. Drag him anywhere.
+Double-click him to start a handoff. **⌥⌘G** hides him before a screen share.
 
-Nothing is recorded. No database, no log, no analytics, no network code in the app at
-all. It knows what is on your screen in the second you press the key, and then it
-forgets.
+## Download and run
 
-**Sharing it with someone?** Give them [`docs/READ-ME-FIRST.md`](docs/READ-ME-FIRST.md).
+**[Download the latest release](https://github.com/NaughtyLlama/ai-slap/releases/latest)**
+→ Assets → **AISlap-apple-silicon.zip**. The older v0.2.0 asset is named AISlap.zip.
 
-## Build it
+**Apple Silicon Mac (M1 or later), macOS 14+.** The prebuilt app does not run on Intel,
+Windows or Linux. Sign in to your preferred AI app or website first; AI-slap needs no API key.
+
+Unzip, drag AISlap.app to Applications, open it, and follow setup for Accessibility and
+Screen Recording. The current beta is **not notarized**, so macOS may require a per-app
+Open Anyway exception. Follow the full **[installation and privacy guide](docs/READ-ME-FIRST.md)**,
+including browser paste instructions. The guide is included in the zip.
+
+## Build from source
+
+Install Apple's Command Line Tools first:
 
 ```bash
-./scripts/build-app.sh --install    # build, install to /Applications, launch
-./scripts/package.sh                # build a zip to hand to someone else
+xcode-select --install
 ```
 
-Command Line Tools only. SwiftPM, no Xcode project. Requires macOS 14 or later, because
-the screenshot uses `SCScreenshotManager`.
+Wait for that installation to finish, then:
 
-## What it needs from macOS
+```bash
+git clone https://github.com/NaughtyLlama/ai-slap.git
+cd ai-slap
+./scripts/build-app.sh
+```
 
-**Accessibility**, to paste into your AI app. Without it the handoff stops at your
-clipboard and you press ⌘V yourself.
+Drag `build/AISlap.app` to Applications and open it. Follow the same setup guide.
+`./scripts/build-app.sh --install` builds, replaces an existing copy in /Applications,
+and launches it. `--run` launches from build/ instead. A locally rebuilt ad-hoc app may
+need Accessibility re-granted; use `scripts/make-signing-identity.sh` for an optional
+stable local development identity.
 
-**Screen Recording**, to take the screenshot. Without it handoffs go over as text.
+The build uses SwiftPM and the host architecture. Intel source builds are not yet
+validated on Intel hardware. The distributed beta is explicitly Apple Silicon only.
 
-Neither is asked for until first run, and both are explained there in terms of what
-breaks without them.
+```bash
+swift test
+./scripts/package.sh       # Apple Silicon beta in dist/, ad-hoc unless DEVELOPER_ID is set
+```
+
+## Package a notarized release
+
+With a Developer ID Application certificate and a notarytool keychain profile configured:
+
+```bash
+export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
+export NOTARY_PROFILE="your-notarytool-profile"
+./scripts/package.sh --notarize
+```
+
+This builds, signs, submits to Apple, staples, then archives the same app and checks
+Gatekeeper. `--repack` only archives an existing build, preserving its signature and
+stapled ticket. `dist/SHA256SUMS.txt` accompanies the zip. Update the version in
+Resources/Info.plist and the release notes before publishing. Test the actual downloaded
+zip on a fresh supported Mac/account, including both permissions and a real handoff.
+
+## Privacy
+
+AI-slap has no screenshot history, database, analytics or network client. It stores
+preferences, emits diagnostic messages, and temporarily holds handoff content in memory.
+It uses the system clipboard, which other software may retain. **Once pasted, content
+is controlled by your chosen AI app/site and its privacy settings.** Review private
+information before approving a handoff. See the [full privacy explanation](docs/READ-ME-FIRST.md#privacy).
 
 ## How it got here
 
-It used to be a bigger idea: the app watched which window you were in, classified whether
-you were doing something by hand that AI could do, and interrupted you about it. That
-layer worked. Over four weeks of real use it fired 31 interruptions and three were
-useful, while 59% of the author's screen time was already inside an AI app.
+The app originally watched windows and interrupted the author when AI might help.
+Four weeks of use produced 31 interruptions and only three useful ones. The screenshot
+was doing the work, so the detection layer and local activity log were removed.
+[NOTES.md](NOTES.md) keeps the engineering history. Older detection code remains in Git.
 
-The screenshot was doing all the work the whole time. So the watching, the rules engine,
-the on-device personaliser, the local log and everything built to protect that log were
-removed, and what is left is the part that was always earning its keep.
+## License
 
-[`NOTES.md`](NOTES.md) keeps the reasoning, including the parts that were expensive to
-learn. The old detection layer is in the git history if it is ever worth reviving.
+[MIT](LICENSE), copyright Chen Lehner.

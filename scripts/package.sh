@@ -1,37 +1,64 @@
 #!/usr/bin/env bash
-# Builds a zip you can hand to someone else, plus the note they need to get past
-# Gatekeeper. Everything lands in dist/.
-#
-# Without a paid Apple Developer ID the result is ad-hoc signed, which means the first
-# launch on any other Mac needs a right-click → Open. Set DEVELOPER_ID and notarise to
-# remove that step:
-#
-#   DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/package.sh
-#
+# Apple Silicon release. --notarize submits to Apple using NOTARY_PROFILE.
+# --repack archives an existing bundle without rebuilding or changing its signature.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-rm -rf build dist
-./scripts/build-app.sh
-
-mkdir -p dist
-/usr/bin/ditto -c -k --keepParent build/AISlap.app dist/AISlap.zip
-cp docs/READ-ME-FIRST.md dist/READ-ME-FIRST.md
-
-echo
-# Ask the question that actually matters — "will another Mac open this?" — rather than
-# parsing the signature and inferring. Gatekeeper is the thing recipients will meet.
-if /usr/sbin/spctl --assess --type execute build/AISlap.app >/dev/null 2>&1; then
-    echo "==> Gatekeeper accepts this build. Recipients can just double-click."
-else
-    echo "!!  Gatekeeper REJECTS this build, which is expected without a Developer ID."
-    echo "!!  Recipients get \"Apple cannot check it for malicious software\" and need the"
-    echo "!!  right-click -> Open step in dist/READ-ME-FIRST.md."
-    echo "!!"
-    echo "!!  To remove that step:"
-    echo "!!    DEVELOPER_ID=\"Developer ID Application: NAME (TEAMID)\" ./scripts/package.sh"
-    echo "!!    xcrun notarytool submit dist/AISlap.zip --keychain-profile PROFILE --wait"
-    echo "!!    xcrun stapler staple build/AISlap.app && ./scripts/package.sh"
+MODE="${1:-}"
+case "$MODE" in ""|--notarize|--repack) ;; *) echo "Usage: $0 [--notarize|--repack]" >&2; exit 1 ;; esac
+if [[ "$MODE" == "--notarize" ]]; then
+    [[ "${DEVELOPER_ID:-}" == "Developer ID Application:"* ]] || {
+        echo "Set DEVELOPER_ID to your Developer ID Application signing identity." >&2; exit 1;
+    }
+    [[ -n "${NOTARY_PROFILE:-}" ]] || {
+        echo "Set NOTARY_PROFILE to a notarytool keychain profile." >&2; exit 1;
+    }
 fi
-echo "==> $(cd dist && pwd)"
-ls -lh dist
+
+APP="build/AISlap.app"
+ZIP="dist/AISlap-apple-silicon.zip"
+if [[ "$MODE" != "--repack" ]]; then
+    # A recipient build must not accidentally use the author's local development key.
+    AISLAP_ARCH=arm64 DEVELOPER_ID="${DEVELOPER_ID:--}" ./scripts/build-app.sh
+fi
+codesign --verify --deep --strict "$APP"
+[[ "$(lipo -archs "$APP/Contents/MacOS/AISlap")" == "arm64" ]] || {
+    echo "This release filename requires an arm64 build." >&2; exit 1;
+}
+mkdir -p dist
+STAGING="$(mktemp -d)"
+trap 'rm -rf "$STAGING"' EXIT
+
+archive_app() {
+    # ditto preserves signatures and stapled tickets. No signing or rebuilding here.
+    rm -rf "$STAGING/AISlap"
+    mkdir -p "$STAGING/AISlap"
+    ditto "$APP" "$STAGING/AISlap/AISlap.app"
+    cp docs/READ-ME-FIRST.md "$STAGING/AISlap/READ-ME-FIRST.md"
+    cp LICENSE "$STAGING/AISlap/LICENSE"
+    rm -f "$ZIP"
+    ditto -c -k --keepParent "$STAGING/AISlap" "$ZIP"
+}
+archive_app
+if [[ "$MODE" == "--notarize" ]]; then
+    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP"
+    archive_app
+fi
+cp docs/READ-ME-FIRST.md dist/READ-ME-FIRST.md
+(cd dist && shasum -a 256 AISlap-apple-silicon.zip > SHA256SUMS.txt)
+
+if /usr/sbin/spctl --assess --type execute "$APP"; then
+    echo "==> Gatekeeper accepts this build."
+else
+    if [[ "$MODE" == "--notarize" ]]; then
+        echo "Notarized release failed Gatekeeper assessment; do not distribute." >&2
+        exit 1
+    fi
+    echo "!! Gatekeeper did not accept this build. Treat it as an unsigned beta."
+    echo "!! Read the per-app Open Anyway instructions before sharing."
+    echo "!! For notarization, set DEVELOPER_ID and NOTARY_PROFILE, then run:"
+    echo "!!   ./scripts/package.sh --notarize"
+fi
+echo "==> Release: $ZIP (Apple Silicon, macOS 14+)"

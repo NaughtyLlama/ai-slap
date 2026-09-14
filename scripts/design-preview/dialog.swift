@@ -45,3 +45,7 @@ let noShot = HandoffRecovery.makeReviewAlert(
     image: nil, hasPermission: false, prompt: HandoffRecovery.defaultPrompt
 )
 render(noShot.alert, to: "dialog-no-screenshot")
+
+render(Onboarding.makeWelcomeAlert().0, to: "welcome")
+render(Onboarding.makePermissionsAlert(.init(accessibility: false, screen: false)), to: "permissions-both")
+render(Onboarding.makePermissionsAlert(.init(accessibility: true, screen: false)), to: "permissions-screenshots")

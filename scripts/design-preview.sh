@@ -27,6 +27,8 @@ swiftc -O "$root/Sources/AISlap/DougSprite.swift" \
     "$root/Sources/AISlap/AIDestination.swift" \
     "$root/Sources/AISlap/Pasteboard.swift" \
     "$root/Sources/AISlap/WindowCapture.swift" \
+    "$root/Sources/AISlap/Onboarding.swift" \
+    "$root/Sources/AISlap/Destinations.swift" \
     "$out/build/dialog/main.swift" \
     -o "$out/build/dialog-preview"
 "$out/build/dialog-preview" "$out"
